@@ -5,6 +5,9 @@
 
 Privacy-first personalized recommendations for Jellyfin based entirely on local watch history and metadata similarity. No cloud services, no tracking. Works on all Jellyfin clients (even TVs).
 
+> [!IMPORTANT]
+> This project will not be updated for Jellyfin 12. If someone would like to maintain a Jellyfin 12-compatible fork, I would be happy to link to it here—please open an issue or discussion.
+
 Please report any issues or feedback on [GitHub Issues](https://github.com/rdpharr/jellyfin-plugin-localrecs/issues).
 
 > ⚠️ **Windows hosts:** As of v0.6.0, this plugin creates filesystem symlinks to expose recommendations. On Windows, symlink creation requires either **running Jellyfin as Administrator** or **enabling Windows Developer Mode** (Settings → Privacy & security → For developers → Developer Mode). Without one of these, recommendation refreshes will log "Access denied creating symlink" and the virtual libraries will be empty. Docker-on-Linux and native Linux deployments are unaffected. See [Troubleshooting](#troubleshooting) below.
@@ -198,7 +201,7 @@ bash dotnet-helper.sh test
 
 ## Contributing
 
-Contributions welcome! See [DESIGN.md](DESIGN.md) for technical details and architecture.
+Contributions to the current Jellyfin version are welcome. See [DESIGN.md](DESIGN.md) for technical details and architecture. For Jellyfin 12 support, please create a fork; maintained forks can be submitted for inclusion in the notice above.
 
 ## Support
 
