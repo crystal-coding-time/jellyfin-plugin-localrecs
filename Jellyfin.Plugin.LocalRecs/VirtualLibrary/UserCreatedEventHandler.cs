@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Events.Users;
 using MediaBrowser.Controller.Events;
@@ -7,45 +8,48 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
 {
     /// <summary>
-    /// Handles user creation events to set up virtual library directories for new users.
+    /// Handles user creation events: creates the new user's recommendation libraries and switches them from
+    /// "access all libraries" (the default for new users) to a list without other users' recommendations.
     /// </summary>
     public class UserCreatedEventHandler : IEventConsumer<UserCreatedEventArgs>
     {
         private readonly ILogger<UserCreatedEventHandler> _logger;
-        private readonly VirtualLibraryManager _virtualLibraryManager;
+        private readonly RecommendationLibraryService _libraryService;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="UserCreatedEventHandler"/> class.
         /// </summary>
         /// <param name="logger">Logger instance.</param>
-        /// <param name="virtualLibraryManager">Virtual library manager for directory operations.</param>
+        /// <param name="libraryService">Recommendation library service.</param>
         /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
         public UserCreatedEventHandler(
             ILogger<UserCreatedEventHandler> logger,
-            VirtualLibraryManager virtualLibraryManager)
+            RecommendationLibraryService libraryService)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _virtualLibraryManager = virtualLibraryManager ?? throw new ArgumentNullException(nameof(virtualLibraryManager));
+            _libraryService = libraryService ?? throw new ArgumentNullException(nameof(libraryService));
         }
 
         /// <inheritdoc />
-        public Task OnEvent(UserCreatedEventArgs eventArgs)
+        public async Task OnEvent(UserCreatedEventArgs eventArgs)
         {
             var user = eventArgs.Argument;
             if (user == null)
             {
                 _logger.LogWarning("Received UserCreatedEventArgs with null user");
-                return Task.CompletedTask;
+                return;
             }
 
-            _logger.LogInformation(
-                "User created: {Username} ({UserId}) - initializing virtual library directories",
-                user.Username,
-                user.Id);
+            _logger.LogInformation("User created: {Username} ({UserId}) - setting up recommendation libraries", user.Username, user.Id);
 
-            _virtualLibraryManager.EnsureUserDirectoriesExist(user.Id, user.Username);
-
-            return Task.CompletedTask;
+            try
+            {
+                await _libraryService.EnsureAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to set up recommendation libraries for new user {Username}", user.Username);
+            }
         }
     }
 }

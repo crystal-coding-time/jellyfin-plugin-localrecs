@@ -62,27 +62,39 @@ namespace Jellyfin.Plugin.LocalRecs
                 return service;
             });
 
-            serviceCollection.AddHostedService(sp =>
-            {
-                var virtualLibraryBasePath = GetVirtualLibraryBasePath(sp);
-                return new VirtualLibraryInitializer(
-                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<VirtualLibraryInitializer>>(),
+            serviceCollection.AddSingleton(sp =>
+                new RecommendationLibraryService(
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<RecommendationLibraryService>>(),
+                    sp.GetRequiredService<MediaBrowser.Controller.Library.ILibraryManager>(),
                     sp.GetRequiredService<MediaBrowser.Controller.Library.IUserManager>(),
-                    virtualLibraryBasePath,
+                    sp.GetRequiredService<MediaBrowser.Model.IO.IFileSystem>(),
+                    sp.GetRequiredService<MediaBrowser.Controller.Providers.IProviderManager>(),
                     sp.GetRequiredService<VirtualLibraryManager>(),
-                    sp.GetRequiredService<PlayStatusSyncService>());
-            });
+                    GetVirtualLibraryBasePath(sp)));
+
+            serviceCollection.AddHostedService(sp =>
+                new VirtualLibraryInitializer(
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<VirtualLibraryInitializer>>(),
+                    sp.GetRequiredService<PlayStatusSyncService>(),
+                    sp.GetRequiredService<RecommendationLibraryService>(),
+                    sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>()));
 
             // User Lifecycle Event Handlers
             serviceCollection.AddScoped<IEventConsumer<UserCreatedEventArgs>>(sp =>
                 new UserCreatedEventHandler(
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<UserCreatedEventHandler>>(),
-                    sp.GetRequiredService<VirtualLibraryManager>()));
+                    sp.GetRequiredService<RecommendationLibraryService>()));
 
             serviceCollection.AddScoped<IEventConsumer<UserDeletedEventArgs>>(sp =>
                 new UserDeletedEventHandler(
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<UserDeletedEventHandler>>(),
-                    sp.GetRequiredService<VirtualLibraryManager>()));
+                    sp.GetRequiredService<VirtualLibraryManager>(),
+                    sp.GetRequiredService<RecommendationLibraryService>()));
+
+            serviceCollection.AddScoped<IEventConsumer<UserUpdatedEventArgs>>(sp =>
+                new UserUpdatedEventHandler(
+                    sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<UserUpdatedEventHandler>>(),
+                    sp.GetRequiredService<RecommendationLibraryService>()));
 
             // Phase 8: Scheduled Tasks
             serviceCollection.AddTransient<IScheduledTask, RecommendationRefreshTask>();

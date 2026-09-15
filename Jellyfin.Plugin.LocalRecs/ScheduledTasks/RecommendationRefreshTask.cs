@@ -23,6 +23,7 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
         private readonly IUserManager _userManager;
         private readonly RecommendationRefreshService _refreshService;
         private readonly VirtualLibraryManager _virtualLibraryManager;
+        private readonly RecommendationLibraryService _libraryService;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RecommendationRefreshTask"/> class.
@@ -31,16 +32,19 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
         /// <param name="userManager">User manager.</param>
         /// <param name="refreshService">Recommendation refresh service.</param>
         /// <param name="virtualLibraryManager">Virtual library manager.</param>
+        /// <param name="libraryService">Recommendation library service.</param>
         public RecommendationRefreshTask(
             ILogger<RecommendationRefreshTask> logger,
             IUserManager userManager,
             RecommendationRefreshService refreshService,
-            VirtualLibraryManager virtualLibraryManager)
+            VirtualLibraryManager virtualLibraryManager,
+            RecommendationLibraryService libraryService)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _userManager = userManager ?? throw new ArgumentNullException(nameof(userManager));
             _refreshService = refreshService ?? throw new ArgumentNullException(nameof(refreshService));
             _virtualLibraryManager = virtualLibraryManager ?? throw new ArgumentNullException(nameof(virtualLibraryManager));
+            _libraryService = libraryService ?? throw new ArgumentNullException(nameof(libraryService));
         }
 
         /// <inheritdoc />
@@ -65,12 +69,10 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
             {
                 var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
 
-                // Step 1: Get all users (5% progress)
+                // Step 1: Get all users and make sure each has their own libraries (5% progress)
                 progress?.Report(0);
                 cancellationToken.ThrowIfCancellationRequested();
                 var users = _userManager.GetUsers().ToList();
-                _logger.LogInformation("Generating recommendations for {UserCount} users", users.Count);
-                progress?.Report(5);
 
                 if (users.Count == 0)
                 {
@@ -78,6 +80,9 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                     progress?.Report(100);
                     return;
                 }
+
+                await _libraryService.EnsureAsync(cancellationToken).ConfigureAwait(false);
+                progress?.Report(5);
 
                 // Step 2: Generate recommendations for all users (5-80% progress)
                 var userIds = users.Select(u => u.Id).ToList();
@@ -87,7 +92,7 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
 
                 progress?.Report(80);
 
-                // Step 3: Sync .strm files for each user (80-90% progress)
+                // Step 3: Sync recommendation folders for each user (80-90% progress)
                 cancellationToken.ThrowIfCancellationRequested();
                 var successfulUsers = 0;
                 var failedUsers = new List<string>();
@@ -100,9 +105,8 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                     {
                         if (userRecommendations.TryGetValue(user.Id, out var recs))
                         {
-                            _logger.LogDebug("Syncing .strm files for user {UserName} ({UserId})", user.Username, user.Id);
+                            _logger.LogDebug("Syncing recommendation folders for user {UserName} ({UserId})", user.Username, user.Id);
 
-                            // Update virtual library files
                             _virtualLibraryManager.SyncRecommendations(
                                 user.Id,
                                 recs.Movies,
@@ -115,7 +119,7 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
 
                             successfulUsers++;
                             _logger.LogDebug(
-                                "Successfully updated .strm files for {UserName}: {MovieCount} movies, {TvCount} TV shows",
+                                "Updated recommendation folders for {UserName}: {MovieCount} movies, {TvCount} TV shows",
                                 user.Username,
                                 recs.Movies.Count,
                                 recs.Tv.Count);
@@ -127,22 +131,19 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Failed to sync .strm files for user {UserName} ({UserId})", user.Username, user.Id);
+                        _logger.LogError(ex, "Failed to sync recommendation folders for user {UserName} ({UserId})", user.Username, user.Id);
                         failedUsers.Add(user.Username);
                     }
                 }
 
                 progress?.Report(90);
 
-                // Step 4: Wait for file system to flush, then trigger library scan (90-95% progress)
-                _logger.LogDebug("Waiting for file system flush before triggering library scan");
-                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
-
-                LogLibraryScanInstructions();
+                // Step 4: Scan the recommendation libraries (90-95% progress)
+                await _libraryService.ScanAsync(cancellationToken).ConfigureAwait(false);
 
                 progress?.Report(95);
 
-                // Note: Play status sync happens automatically via ItemAdded event when Jellyfin scans the new .strm files
+                // Note: Play status sync happens automatically via ItemAdded event when Jellyfin scans new items
 
                 // Step 5: Report results (100% progress)
                 var duration = DateTime.UtcNow - startTime;
@@ -174,20 +175,19 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
         /// <inheritdoc />
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
         {
-            // Daily execution at 4:00 AM by default
+            // At startup, so a fresh install gets recommendations without a manual run, and daily at 4:00 AM
             return new[]
             {
+                new TaskTriggerInfo
+                {
+                    Type = MediaBrowser.Model.Tasks.TaskTriggerInfoType.StartupTrigger
+                },
                 new TaskTriggerInfo
                 {
                     Type = MediaBrowser.Model.Tasks.TaskTriggerInfoType.DailyTrigger,
                     TimeOfDayTicks = TimeSpan.FromHours(4).Ticks
                 }
             };
-        }
-
-        private void LogLibraryScanInstructions()
-        {
-            _logger.LogInformation("Virtual library files updated. Scan recommendation libraries manually or wait for the next scheduled scan to see updates.");
         }
     }
 }

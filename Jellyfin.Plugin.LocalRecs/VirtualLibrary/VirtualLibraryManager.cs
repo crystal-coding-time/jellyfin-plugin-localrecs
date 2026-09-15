@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -160,10 +161,11 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             MediaType mediaType)
         {
             var libraryPath = GetUserLibraryPath(userId, mediaType);
-
-            ClearRecommendationsInternal(userId, mediaType);
             Directory.CreateDirectory(libraryPath);
 
+            // Folders that stay recommended are left in place and only changed files are rewritten, so
+            // Jellyfin doesn't re-read every item on each refresh. Everything else is removed below.
+            var keptFolders = new HashSet<string>(StringComparer.Ordinal);
             var createdCount = 0;
             foreach (var rec in recommendations)
             {
@@ -191,6 +193,10 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                         CreateMovieFolderStructure(libraryPath, item);
                     }
 
+                    var folder = Path.Combine(libraryPath, GenerateFolderName(item));
+                    DeleteDanglingLinks(folder);
+                    keptFolders.Add(folder);
+
                     createdCount++;
                 }
                 catch (UnauthorizedAccessException ex)
@@ -207,6 +213,14 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 }
             }
 
+            foreach (var dir in Directory.GetDirectories(libraryPath))
+            {
+                if (!keptFolders.Contains(dir))
+                {
+                    DeleteFolder(dir);
+                }
+            }
+
             _logger.LogDebug(
                 "Updated {MediaType} recommendations for user {UserId}: {Created} items created",
                 mediaType,
@@ -216,30 +230,39 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             return createdCount;
         }
 
-        private void ClearRecommendationsInternal(Guid userId, MediaType mediaType)
+        /// <summary>
+        /// Removes links whose source file is gone (e.g. a deleted episode) from a folder that is kept.
+        /// </summary>
+        private void DeleteDanglingLinks(string folder)
         {
-            var libraryPath = GetUserLibraryPath(userId, mediaType);
-
-            if (!Directory.Exists(libraryPath))
+            if (!Directory.Exists(folder))
             {
                 return;
             }
 
+            foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
+            {
+                var info = new FileInfo(file);
+                if (info.LinkTarget is not null && !File.Exists(file))
+                {
+                    info.Delete();
+                }
+            }
+        }
+
+        private void DeleteFolder(string path)
+        {
             try
             {
-                Directory.Delete(libraryPath, recursive: true);
-                _logger.LogDebug(
-                    "Cleared all {MediaType} items for user {UserId}",
-                    mediaType,
-                    userId);
+                Directory.Delete(path, recursive: true);
             }
             catch (IOException ex)
             {
-                _logger.LogError(ex, "Failed to delete virtual library directory (IO error): {Path}", libraryPath);
+                _logger.LogError(ex, "Failed to delete virtual library folder (IO error): {Path}", path);
             }
             catch (UnauthorizedAccessException ex)
             {
-                _logger.LogError(ex, "Failed to delete virtual library directory (access denied): {Path}", libraryPath);
+                _logger.LogError(ex, "Failed to delete virtual library folder (access denied): {Path}", path);
             }
         }
 
@@ -253,6 +276,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             var folderName = GenerateFolderName(item);
             var movieFolderPath = Path.Combine(libraryPath, folderName);
             Directory.CreateDirectory(movieFolderPath);
+            WriteNfo(Path.Combine(movieFolderPath, folderName + ".nfo"), "movie", item);
 
             var extension = Path.GetExtension(item.Path);
             var mediaLinkPath = Path.Combine(movieFolderPath, folderName + extension);
@@ -282,7 +306,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             var seriesSourceDir = series.Path;
             var trailerCount = LinkTrailers(seriesPath, seriesFolderName, seriesSourceDir);
             var artworkCount = LinkItemArtwork(seriesPath, series);
-            WriteTvShowNfo(seriesPath, series);
+            WriteNfo(Path.Combine(seriesPath, "tvshow.nfo"), "tvshow", series);
 
             var episodes = _libraryManager.GetItemList(new InternalItemsQuery
             {
@@ -350,9 +374,16 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         /// </summary>
         private void CreateSymlink(string linkPath, string targetPath)
         {
-            if (File.Exists(linkPath))
+            var existing = new FileInfo(linkPath);
+            if (existing.LinkTarget == targetPath)
             {
-                File.Delete(linkPath);
+                return;
+            }
+
+            // LinkTarget also catches a dangling link, which FileInfo.Exists reports as missing.
+            if (existing.Exists || existing.LinkTarget is not null)
+            {
+                existing.Delete();
             }
 
             File.CreateSymbolicLink(linkPath, targetPath);
@@ -483,23 +514,38 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         }
 
         /// <summary>
-        /// Writes a minimal tvshow.nfo containing provider IDs so Jellyfin's scanner reliably
-        /// identifies the folder as a Series rather than treating its episodes as standalone items.
+        /// Writes a minimal NFO with the metadata the recommendation libraries display, since they never
+        /// fetch metadata online. For series, tvshow.nfo also makes Jellyfin's scanner reliably identify
+        /// the folder as a Series rather than treating its episodes as standalone items.
         /// </summary>
-        private void WriteTvShowNfo(string seriesPath, Series series)
+        private void WriteNfo(string nfoPath, string rootElement, BaseItem item)
         {
-            var nfoPath = Path.Combine(seriesPath, "tvshow.nfo");
-
             var sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
-            sb.AppendLine("<tvshow>");
-            sb.Append("  <title>").Append(XmlEscape(series.Name ?? "Unknown")).AppendLine("</title>");
-            if (series.ProductionYear.HasValue)
+            sb.Append('<').Append(rootElement).AppendLine(">");
+            sb.Append("  <title>").Append(XmlEscape(item.Name ?? "Unknown")).AppendLine("</title>");
+            if (item.ProductionYear.HasValue)
             {
-                sb.Append("  <year>").Append(series.ProductionYear.Value).AppendLine("</year>");
+                sb.Append("  <year>").Append(item.ProductionYear.Value).AppendLine("</year>");
             }
 
-            var providerIds = series.ProviderIds ?? new Dictionary<string, string>();
+            AppendElement(sb, "plot", item.Overview);
+            AppendElement(sb, "tagline", item.Tagline);
+            AppendElement(sb, "mpaa", item.OfficialRating);
+            AppendElement(sb, "rating", item.CommunityRating?.ToString(CultureInfo.InvariantCulture));
+            AppendElement(sb, "criticrating", item.CriticRating?.ToString(CultureInfo.InvariantCulture));
+            AppendElement(sb, "premiered", item.PremiereDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            foreach (var genre in item.Genres ?? Array.Empty<string>())
+            {
+                AppendElement(sb, "genre", genre);
+            }
+
+            foreach (var studio in item.Studios ?? Array.Empty<string>())
+            {
+                AppendElement(sb, "studio", studio);
+            }
+
+            var providerIds = item.ProviderIds ?? new Dictionary<string, string>();
             if (providerIds.TryGetValue("Tmdb", out var tmdb) && !string.IsNullOrEmpty(tmdb))
             {
                 sb.Append("  <tmdbid>").Append(tmdb).AppendLine("</tmdbid>");
@@ -518,20 +564,33 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 sb.Append("  <uniqueid type=\"imdb\">").Append(imdb).AppendLine("</uniqueid>");
             }
 
-            sb.AppendLine("</tvshow>");
+            sb.Append("</").Append(rootElement).AppendLine(">");
 
+            // Only rewrite on change: a newer NFO makes Jellyfin re-read the item on the next scan.
+            var content = sb.ToString();
             try
             {
-                File.WriteAllText(nfoPath, sb.ToString(), new UTF8Encoding(false));
+                if (!File.Exists(nfoPath) || File.ReadAllText(nfoPath) != content)
+                {
+                    File.WriteAllText(nfoPath, content, new UTF8Encoding(false));
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to write tvshow.nfo for {SeriesName}", series.Name);
+                _logger.LogWarning(ex, "Failed to write {NfoPath}", nfoPath);
             }
         }
 
         private string XmlEscape(string value)
             => value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+
+        private void AppendElement(StringBuilder sb, string name, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                sb.Append("  <").Append(name).Append('>').Append(XmlEscape(value)).Append("</").Append(name).AppendLine(">");
+            }
+        }
 
         private bool TryCreateSymlink(string linkPath, string targetPath)
         {

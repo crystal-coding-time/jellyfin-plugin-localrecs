@@ -5,8 +5,8 @@
 
 Privacy-first personalized recommendations for Jellyfin based entirely on local watch history and metadata similarity. No cloud services, no tracking. Works on all Jellyfin clients (even TVs).
 
-> [!IMPORTANT]
-> This project will not be updated for Jellyfin 12. If someone would like to maintain a Jellyfin 12-compatible fork, I would be happy to link to it here—please open an issue or discussion.
+> [!NOTE]
+> This is the Jellyfin 12 fork of [rdpharr/jellyfin-plugin-localrecs](https://github.com/rdpharr/jellyfin-plugin-localrecs), which is not being updated for Jellyfin 12.
 
 Please report any issues or feedback on [GitHub Issues](https://github.com/rdpharr/jellyfin-plugin-localrecs/issues).
 
@@ -39,40 +39,23 @@ Please report any issues or feedback on [GitHub Issues](https://github.com/rdpha
 
 3. **Restart Jellyfin server**
 
-4. **Configure virtual libraries** (see Setup below)
+That's it: there is no setup (see below).
 
 ## Setup
 
-### Quick Start (5-10 minutes)
+None. When Jellyfin starts, and whenever a user is added, the plugin:
 
-#### 1. View Library Paths
-- Navigate to: **Dashboard → Plugins → Local Recommendations → Setup Guide**
-- Copy the library paths for each user (two per user: Movies and TV)
+- **Creates two libraries per user**, **Recommended Movies (name)** and **Recommended Shows (name)**, which appear on that user's home screen as tiles and "Latest" rows.
+- **Sets each user's Library Access** so they see their own recommendation libraries and nobody else's. Users who had "access all libraries" are switched to an explicit list of every library. Libraries you add later are added to their list automatically, and a library you remove from a user stays removed. To give someone everything again, tick "access all libraries": the plugin turns it straight back into a full list without other users' recommendations.
+- **Fills the libraries** on the next **Refresh Local Recommendations** run (at startup and daily at 4 AM, or Dashboard → Scheduled Tasks → Run).
 
-#### 2. Create Virtual Libraries
-For each user, create **two** libraries:
+Recommendation libraries use only the metadata and artwork the plugin copies from your real libraries: no online lookups, nothing written into your media folders, and no real-time folder monitoring. Deleting a user removes their recommendation libraries.
 
-**Movies:**
-- Dashboard → Libraries → Add Media Library
-- Content Type: **Movies**
-- Add media location: Paste the **Movie Library Path** from Setup Guide
-- Library name: User's suggested name (e.g., "John's Recommended Movies")
-
-**TV Shows:**
-- Content Type: **Shows**
-- Add media location: Paste the **TV Library Path** from Setup Guide
-- Library name: User's suggested name (e.g., "John's Recommended TV")
-
-#### 3. Set Permissions
-For each user:
-- Dashboard → Users → [Username] → Library Access
-- Enable **only** that user's recommendation libraries
-- Disable other users' recommendation libraries
-
-#### 4. Generate Recommendations
-- Dashboard → Scheduled Tasks → "Refresh Local Recommendations" → Run Now
-- Wait ~1-5 minutes (depending on library size)
-- Manually scan recommendation libraries to see results
+> **Upgrading from 0.7 or earlier:** libraries you created by hand for each user are adopted, not recreated.
+>
+> **Upgrading from the 0.8.0 pre-release:** its shared "Recommended Movies" / "Recommended Shows" libraries and the `localrecs-…` blocked tags it added to users are removed automatically.
+>
+> **Uninstalling:** users stay on explicit library lists. Tick "access all libraries" for anyone who should have everything again, and delete the recommendation libraries.
 
 ## Configuration
 

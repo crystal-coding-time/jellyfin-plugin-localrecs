@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - Unreleased
+
+### Added
+
+- **Automatic setup.** Each user gets their own "Recommended Movies (name)" and "Recommended Shows (name)" libraries, created at startup and when users are added, and removed when users are deleted. Libraries created by hand for 0.7 and earlier are adopted.
+- **Automatic library access.** Each user's Library Access is set so they see only their own recommendation libraries. Users on "access all libraries" are switched to an explicit list of every library; libraries added later are added for them, and turning "access all libraries" back on is converted again straight away. If anything fails, recommendation libraries stay hidden rather than becoming visible to other users.
+
+### Changed
+
+- **Recommendation libraries use only local metadata:** no online lookups, no metadata saving, no chapter or trickplay image extraction, and no real-time monitoring. The plugin writes title, plot, genres, ratings, studios and dates into each recommendation's NFO.
+- **Refreshes are incremental.** Unchanged recommendations are left in place and NFOs are only rewritten when their content changes, so Jellyfin no longer re-reads every recommendation on every refresh. Links whose source file was deleted are removed.
+- The refresh task also runs at startup, and scans the recommendation libraries itself when it finishes; no manual scan is needed.
+
+### Fixed
+
+- **Startup no longer blocks the server.** Library setup and the play-status sync run in the background after Jellyfin has started; the sync held up startup for ~2.5 minutes on a 50-user server.
+- "Generating recommendations" was logged twice per refresh.
+
+### Upgrade Notes
+
+- Supersedes the withdrawn 0.8.0 pre-release. Its shared libraries and the `localrecs-…` blocked tags it added to users are removed automatically.
+
 ## [0.7.0] - 2026-09-15
 
 ### Changed

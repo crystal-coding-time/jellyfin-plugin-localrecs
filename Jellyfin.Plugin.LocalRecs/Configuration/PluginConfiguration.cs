@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using MediaBrowser.Model.Plugins;
 
@@ -85,6 +86,19 @@ namespace Jellyfin.Plugin.LocalRecs.Configuration
         /// Default: 0.2 (20% rating proximity, 80% content similarity).
         /// </summary>
         public double RatingProximityWeight { get; set; }
+
+        /// <summary>
+        /// Gets or sets the users who had "access all libraries" before LocalRecs switched them to an explicit
+        /// library list (needed to hide other users' recommendation libraries). Libraries added to the server
+        /// later are enabled for these users automatically. Maintained by the plugin.
+        /// </summary>
+        public Guid[] AllLibrariesUserIds { get; set; } = Array.Empty<Guid>();
+
+        /// <summary>
+        /// Gets or sets the server libraries that existed at the last access sync, so a newly added library
+        /// can be told apart from one an admin removed from a user on purpose. Maintained by the plugin.
+        /// </summary>
+        public Guid[] KnownLibraryIds { get; set; } = Array.Empty<Guid>();
 
         /// <summary>
         /// Validates the configuration and returns validation errors.

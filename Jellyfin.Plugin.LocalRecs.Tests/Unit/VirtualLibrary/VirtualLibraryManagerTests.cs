@@ -168,6 +168,40 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Unit.VirtualLibrary
         }
 
         [Fact]
+        public void SyncRecommendations_LeavesUnchangedItemsInPlace()
+        {
+            if (!CanCreateSymlinks())
+            {
+                return;
+            }
+
+            var userId = Guid.NewGuid();
+            var movieId = Guid.NewGuid();
+            _mockLibraryManager.Setup(m => m.GetItemById(movieId)).Returns(new Movie
+            {
+                Id = movieId,
+                Name = "Test Movie",
+                Path = _sourceMediaFile,
+                ProductionYear = 2023
+            });
+            var recommendations = new[] { new ScoredRecommendation(movieId, 0.95f) };
+            var moviePath = _manager.GetUserLibraryPath(userId, MediaType.Movie);
+
+            _manager.SyncRecommendations(userId, recommendations, MediaType.Movie);
+            var nfo = Directory.GetFiles(moviePath, "*.nfo", SearchOption.AllDirectories).Single();
+            var marker = new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(nfo, marker);
+
+            // Same recommendation again: nothing is rewritten, so Jellyfin has nothing to re-read
+            _manager.SyncRecommendations(userId, recommendations, MediaType.Movie);
+            File.GetLastWriteTimeUtc(nfo).Should().Be(marker);
+
+            // No longer recommended: removed
+            _manager.SyncRecommendations(userId, Array.Empty<ScoredRecommendation>(), MediaType.Movie);
+            Directory.GetFileSystemEntries(moviePath).Should().BeEmpty();
+        }
+
+        [Fact]
         public void SyncRecommendations_PreservesSourceFileExtension()
         {
             if (!CanCreateSymlinks())

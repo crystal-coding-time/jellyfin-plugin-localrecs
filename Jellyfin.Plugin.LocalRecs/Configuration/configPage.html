@@ -233,187 +233,21 @@
                             // Check if all libraries are created
                             var allCreated = users.every(function(user) { return user.LibrariesCreated; });
                             
-                            if (allCreated) {
-                                container.innerHTML = '<div style="background: rgba(76, 175, 80, 0.1); padding: 1.5em; border-left: 4px solid #4caf50;">' +
-                                    '<h3 style="margin-top: 0;">Setup Complete!</h3>' +
-                                    '<p>All recommendation libraries have been created. No further setup is required.</p>' +
-                                    '<p>Run the "Refresh Local Recommendations" scheduled task to generate recommendations.</p>' +
+                            container.innerHTML = allCreated
+                                ? '<div style="background: rgba(76, 175, 80, 0.1); padding: 1.5em; border-left: 4px solid #4caf50;">' +
+                                    '<h3 style="margin-top: 0;">Setup Complete</h3>' +
+                                    '<p>Every user has their own <strong>Recommended Movies</strong> and <strong>Recommended Shows</strong> libraries, visible only to them.</p>' +
+                                    '</div>'
+                                : '<div style="background: rgba(255,193,7,0.1); padding: 1.5em; border-left: 4px solid #ffc107;">' +
+                                    '<h3 style="margin-top: 0;">Setting Up Automatically</h3>' +
+                                    '<p>Each user\'s <strong>Recommended Movies</strong> and <strong>Recommended Shows</strong> libraries are created, and made visible only to that user, when Jellyfin starts and when a user is added.</p>' +
+                                    '<p>Recommendations fill in on the next <strong>Refresh Local Recommendations</strong> run (at startup and daily at 4 AM). To run it now: <strong>Dashboard → Scheduled Tasks → Refresh Local Recommendations → Run</strong>.</p>' +
                                     '</div>';
-                                return;
-                            }
-                            
-                            var html = '<div class="paperList">';
-                            
-                            users.forEach(function(user) {
-                                html += self.renderUserSetupCard(user);
-                            });
-                            
-                            html += '</div>';
-                            html += self.renderNextStepsBox();
-                            
-                            container.innerHTML = html;
-                            
-                            // Add copy button event listeners
-                            self.initCopyButtons(page);
                         })
                         .catch(function(error) {
                             console.error('Failed to load library paths:', error);
                             container.innerHTML = '<p style="color: #ff5252;">Error loading library paths. Please check that the plugin is properly installed.</p>';
                         });
-                },
-                
-                /**
-                 * Renders next steps box.
-                 */
-                renderNextStepsBox: function() {
-                    var html = '<div style="background: rgba(255,193,7,0.1); padding: 1.5em; margin-top: 2em; border-left: 4px solid #ffc107;">';
-                    html += '<h3 style="margin-top: 0;">After Creating Libraries</h3>';
-                    html += '<p><strong>Run the recommendation refresh task:</strong></p>';
-                    html += '<ol style="margin: 0.5em 0; padding-left: 1.5em; line-height: 1.8;">';
-                    html += '<li>Go to <strong>Dashboard → Scheduled Tasks</strong></li>';
-                    html += '<li>Find <strong>"Refresh Local Recommendations"</strong></li>';
-                    html += '<li>Click the <strong>Play button</strong> to run it now</li>';
-                    html += '</ol>';
-                    html += '</div>';
-                    return html;
-                },
-                
-                /**
-                 * Renders a user setup card.
-                 */
-                renderUserSetupCard: function(user) {
-                    // Skip rendering if libraries are already created
-                    if (user.LibrariesCreated) {
-                        return '';
-                    }
-
-                    var username = this.escapeHtml(user.Username);
-                    var moviePath = this.escapeHtml(user.MovieLibraryPath);
-                    var tvPath = this.escapeHtml(user.TvLibraryPath);
-                    var suggestedMovieName = this.escapeHtml(user.SuggestedMovieLibraryName);
-                    var suggestedTvName = this.escapeHtml(user.SuggestedTvLibraryName);
-                    var userIdForButton = user.UserId.replace(/-/g, '');
-                    
-                    var html = '<div class="listItem" style="margin: 1em 0; padding: 1.5em; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02);">';
-                    
-                    html += '<h3 style="margin-top: 0;">' + username + '</h3>';
-                    
-                    // Movie library section
-                    html += '<div style="margin: 1.5em 0;">';
-                    html += '<h4 style="margin-bottom: 0.5em;">Recommended Movies Library</h4>';
-                    html += '<div class="inputContainer">';
-                    html += '<label class="inputLabel inputLabelUnfocused">Folder Path:</label>';
-                    html += '<div style="display: flex; gap: 0.5em; align-items: center;">';
-                    html += '<input type="text" class="emby-input" readonly value="' + moviePath + '" style="flex: 1; font-family: monospace;" />';
-                    html += '<button is="emby-button" type="button" class="raised copy-button" data-path="' + moviePath + '" style="min-width: 80px;">Copy</button>';
-                    html += '</div>';
-                    html += '<div class="fieldDescription" style="margin-top: 0.5em;">Suggested Library Name: <strong>' + suggestedMovieName + '</strong></div>';
-                    html += '</div>';
-                    html += '</div>';
-                    
-                    // TV library section
-                    html += '<div style="margin: 1.5em 0;">';
-                    html += '<h4 style="margin-bottom: 0.5em;">Recommended TV Library</h4>';
-                    html += '<div class="inputContainer">';
-                    html += '<label class="inputLabel inputLabelUnfocused">Folder Path:</label>';
-                    html += '<div style="display: flex; gap: 0.5em; align-items: center;">';
-                    html += '<input type="text" class="emby-input" readonly value="' + tvPath + '" style="flex: 1; font-family: monospace;" />';
-                    html += '<button is="emby-button" type="button" class="raised copy-button" data-path="' + tvPath + '" style="min-width: 80px;">Copy</button>';
-                    html += '</div>';
-                    html += '<div class="fieldDescription" style="margin-top: 0.5em;">Suggested Library Name: <strong>' + suggestedTvName + '</strong></div>';
-                    html += '</div>';
-                    html += '</div>';
-                    
-                    // Instructions - now in a more readable format
-                    html += '<div style="margin-top: 2em; padding: 1em; background: rgba(33,150,243,0.1); border-left: 4px solid #2196f3;">';
-                    html += '<h4 style="margin-top: 0;">Setup Instructions</h4>';
-                    html += '<ol style="margin: 0.5em 0; padding-left: 1.5em; line-height: 1.8;">';
-                    html += '<li>Go to <strong>Dashboard → Libraries → Add Media Library</strong></li>';
-                    html += '<li>Create the Movies library:';
-                    html += '<ul style="margin-top: 0.3em;"><li>Select <strong>Movies</strong> as content type</li>';
-                    html += '<li>Add the Movies folder path shown above</li></ul></li>';
-                    html += '<li>Create the TV library:';
-                    html += '<ul style="margin-top: 0.3em;"><li>Select <strong>Shows</strong> as content type</li>';
-                    html += '<li>Add the TV folder path shown above</li></ul></li>';
-                    html += '<li>Set library permissions: <strong>Dashboard → Users → ' + username + ' → Library Access</strong></li>';
-                    html += '</ol>';
-                    html += '</div>';
-                    
-                    html += '</div>';
-                    return html;
-                },
-                
-                /**
-                 * Initializes copy button event handlers.
-                 */
-                initCopyButtons: function(page) {
-                    var self = this;
-                    var copyButtons = page.querySelectorAll('.copy-button');
-                    
-                    copyButtons.forEach(function(button) {
-                        button.addEventListener('click', function(e) {
-                            var btn = e.currentTarget;
-                            var path = btn.getAttribute('data-path');
-                            
-                            // Try modern clipboard API first
-                            if (navigator.clipboard && navigator.clipboard.writeText) {
-                                navigator.clipboard.writeText(path)
-                                    .then(function() {
-                                        btn.textContent = 'Copied!';
-                                        setTimeout(function() {
-                                            btn.textContent = 'Copy';
-                                        }, 2000);
-                                    })
-                                    .catch(function(err) {
-                                        console.error('Clipboard API failed:', err);
-                                        self.fallbackCopyToClipboard(path, btn);
-                                    });
-                            } else {
-                                // Fallback for browsers without clipboard API
-                                self.fallbackCopyToClipboard(path, btn);
-                            }
-                        });
-                    });
-                },
-                
-                /**
-                 * Fallback copy method using a temporary textarea element.
-                 */
-                fallbackCopyToClipboard: function(text, btn) {
-                    var textArea = document.createElement('textarea');
-                    textArea.value = text;
-                    textArea.style.position = 'fixed';
-                    textArea.style.top = '0';
-                    textArea.style.left = '0';
-                    textArea.style.width = '2em';
-                    textArea.style.height = '2em';
-                    textArea.style.padding = '0';
-                    textArea.style.border = 'none';
-                    textArea.style.outline = 'none';
-                    textArea.style.boxShadow = 'none';
-                    textArea.style.background = 'transparent';
-                    
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    
-                    try {
-                        var successful = document.execCommand('copy');
-                        if (successful) {
-                            btn.textContent = 'Copied!';
-                            setTimeout(function() {
-                                btn.textContent = 'Copy';
-                            }, 2000);
-                        } else {
-                            console.error('execCommand copy failed');
-                            alert('Failed to copy to clipboard. Please copy manually.');
-                        }
-                    } catch (err) {
-                        console.error('Fallback copy failed:', err);
-                        alert('Failed to copy to clipboard. Please copy manually.');
-                    }
-                    
-                    document.body.removeChild(textArea);
                 },
                 
                 /**
