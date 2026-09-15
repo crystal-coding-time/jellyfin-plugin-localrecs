@@ -32,7 +32,7 @@ Please report any issues or feedback on [GitHub Issues](https://github.com/rdpha
 
 1. **Add plugin repository:**  
    Dashboard → Plugins → Repositories → Add  
-   `https://raw.githubusercontent.com/rdpharr/jellyfin-plugin-localrecs/main/manifest.json`
+   `https://raw.githubusercontent.com/crystal-coding-time/jellyfin-plugin-localrecs/main/manifest.json`
 
 2. **Install plugin:**  
    Dashboard → Plugins → Catalog → Install "Local Recommendations"

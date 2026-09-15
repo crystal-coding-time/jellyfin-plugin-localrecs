@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.7.0.0",
+        "changelog": "Jellyfin 12 support\n- Retargeted to .NET 10 and built against Jellyfin 12.0.0 (tested on 12.0 and 12.1)\n- No functional changes\n- REQUIRES Jellyfin 12.0 or newer; 10.11.9+ servers should stay on 0.6.1\n- Run a full library scan after upgrading Jellyfin to 12",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/releases/download/v0.7.0/jellyfin-plugin-localrecs-v0.7.0.zip",
+        "checksum": "aafd2cbd852aea0c49121448eb04a955",
+        "timestamp": "2026-09-15T00:00:00Z"
+      },
+      {
         "version": "0.6.1.0",
         "changelog": "Jellyfin 10.11.9+ compatibility and recommendation-quality fixes\n- Fixes MissingMethodException crash on Jellyfin 10.11.9/10.11.10 (#17, fixes #21): all IUserManager.Users call sites now use GetUsers()\n- TV series now weighted by most recently watched episode date instead of always 'today' (#19)\n- Replaced play-count rewatch boost with recency-driven Recent Watch Emphasis using decay-squared amplification (#20); the RewatchBoost setting becomes RecentWatchBoost (default 1.0)\n- Config page numeric fields saved as 0 no longer revert to defaults (#22)\n- REQUIRES Jellyfin 10.11.9 or newer",
         "targetAbi": "10.11.9.0",
