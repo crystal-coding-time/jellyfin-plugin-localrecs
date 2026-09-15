@@ -24,9 +24,9 @@ Please report any issues or feedback on [GitHub Issues](https://github.com/rdpha
 
 ## Requirements
 
-- **Jellyfin Server:** 10.11.9+
-- **.NET Runtime:** 9.0
-- **Target ABI:** 10.11.9.0
+- **Jellyfin Server:** 12.0+ (tested against 12.0 and 12.1; use plugin 0.6.1 for 10.11.9+)
+- **.NET Runtime:** 10.0
+- **Target ABI:** 12.0.0.0
 
 ## Installation
 
@@ -182,7 +182,7 @@ restricted `.strm` parser entirely.
 
 ## Building from Source
 
-**Prerequisites:** .NET 9.0 SDK, Git
+**Prerequisites:** .NET 10.0 SDK, Git
 
 ```bash
 git clone https://github.com/rdpharr/jellyfin-plugin-localrecs.git
@@ -194,7 +194,7 @@ bash dotnet-helper.sh build
 # Run tests
 bash dotnet-helper.sh test
 
-# Output: Jellyfin.Plugin.LocalRecs/bin/Debug/net9.0/
+# Output: Jellyfin.Plugin.LocalRecs/bin/Debug/net10.0/
 ```
 
 **Windows:** Use Git Bash or WSL to run the helper script.

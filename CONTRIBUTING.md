@@ -48,7 +48,7 @@ Use the feature request issue template when available.
    ```
 
 3. **Set Up Development Environment**
-   - Install .NET 9.0 SDK
+   - Install .NET 10.0 SDK
    - Install Git Bash (Windows) or use native bash (Linux/Mac)
 
 4. **Build and Test**

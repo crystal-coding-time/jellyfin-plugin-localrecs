@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - Unreleased
+
+### Changed
+
+- **Jellyfin 12 support**: retargeted to .NET 10 and built against Jellyfin 12.0.0 (ABI `12.0.0.0`). No code changes were needed; the build also runs against the 12.1 assemblies with the full test suite passing.
+
+### Upgrade Notes
+
+- **Requires Jellyfin 12.0 or newer.** Plugins built for 10.11 do not load on 12, and this build does not load on 10.11. Servers on 10.11.9+ should stay on 0.6.1.
+- After upgrading Jellyfin to 12, run a full library scan (Jellyfin requires one) before refreshing recommendations.
+
 ## [0.6.1] - 2026-05-30
 
 ### Fixed
