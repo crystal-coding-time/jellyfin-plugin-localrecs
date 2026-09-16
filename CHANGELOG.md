@@ -5,7 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - Unreleased
+## [0.9.3] - Unreleased
+
+### Fixed
+
+- **A second refresh no longer costs more than the first.** The per-user loop asked the database one question per candidate series per user — "has this user watched any episode of this show?" — about 15,000 queries per refresh on a 49-user server, and every one of them grew slower as the plugin's own recommendation copies accumulated in the same database. It now asks once per user and answers the rest in memory, scoped to the real libraries. The same per-series pattern in the profile builder, which looked up each series' most recently watched episode, was replaced the same way.
+
+  Measured on a 49-user test server (1,200 movies, 300 shows of 12 episodes, 18,850 recommendation items after the first run), running two refreshes with no activity between them:
+
+  | | 0.9.2 | 0.9.3 |
+  |---|---|---|
+  | Generation phase, refresh #1 | 247s | 33s |
+  | Generation phase, refresh #2 | 1,126s | 49s |
+  | Refresh #2, total | 1,183s | 102s |
+
+### Known issues
+
+- A *first* refresh is still dominated by Jellyfin's library scan of the newly written recommendations — about 15 minutes for 100 libraries on the test server. This release does not change that. What it changes is the cost of a repeat refresh.
+- Posters are missing for some users' movie recommendations and for all TV episode recommendations, and the affected entries show the raw folder name instead of the clean title.
+
+## [0.9.2] - 2026-09-16
 
 Supersedes the 0.9.1 pre-release, which shipped everything below but left refreshes so expensive that a second run on a 49-user server made no visible progress for half an hour. 0.9.1 in turn superseded 0.9.0, which left watch status stuck and recommendation libraries empty until a manual scan.
 
@@ -22,7 +41,8 @@ Supersedes the 0.9.1 pre-release, which shipped everything below but left refres
 
 ### Fixed
 
-- **Refreshes no longer cost more every time they run.** Recommendations are real items in the same database as the originals, so each refresh enlarged the set the next one had to walk; on a 49-user, 19,000-item server the first run took 41 minutes and the second made no visible progress for half an hour. The library queries are now scoped to the real libraries, the per-user access check asks for item ids instead of whole items, and each user's watch data is read in one batch instead of a lookup per item. The refresh task also reports progress for every user it finishes, so a long run can be told apart from a stuck one.
+- **A long refresh no longer looks like a hung one.** The task reported 5% for the entire per-user loop, so a run still working and a run that had died were indistinguishable; 0.9.1 sat at a frozen percentage for 20–31 minutes. It now reports progress as each user finishes.
+- **Library queries no longer count the plugin's own output.** Recommendations are real items in the same database as the originals, so the engine's queries had begun returning them alongside the originals. Queries are now scoped to the folders the real media lives in, the per-user access check asks for item ids instead of whole items, and each user's watch data is read in one batch instead of a lookup per item. This did **not** make a refresh cheaper overall: on a 49-user server the second refresh still took longer than the first. See 0.9.3.
 - **Watch status reaches the real item immediately again.** The plugin looked the real item up by path, which builds a fresh copy, while Jellyfin serves requests from its cached copy and reads played state from the copy's own user data. Marking a recommendation played updated the database but the server kept reporting the real item as unwatched until it restarted.
 - **Recommendation libraries no longer stay empty on a fresh install.** Jellyfin registers a library's folders when the library is created, when they are still empty, so nothing was indexed until someone ran a full library scan by hand. The plugin now re-registers them before scanning.
 - **Refreshes no longer get slower as users are added.** Every refresh scanned every user's libraries; with 49 users a second refresh took over half an hour and stalled. Only users whose recommendations changed are scanned, and nothing is scanned when nothing changed.
