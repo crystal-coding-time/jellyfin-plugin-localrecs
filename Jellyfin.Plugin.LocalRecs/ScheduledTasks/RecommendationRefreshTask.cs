@@ -96,6 +96,7 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                 cancellationToken.ThrowIfCancellationRequested();
                 var successfulUsers = 0;
                 var failedUsers = new List<string>();
+                var changedUsers = new List<Guid>();
 
                 foreach (var user in users)
                 {
@@ -107,15 +108,14 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                         {
                             _logger.LogDebug("Syncing recommendation folders for user {UserName} ({UserId})", user.Username, user.Id);
 
-                            _virtualLibraryManager.SyncRecommendations(
-                                user.Id,
-                                recs.Movies,
-                                MediaType.Movie);
+                            _virtualLibraryManager.SyncRecommendations(user.Id, recs.Movies, MediaType.Movie, out var moviesChanged);
+                            _virtualLibraryManager.SyncRecommendations(user.Id, recs.Tv, MediaType.Series, out var showsChanged);
 
-                            _virtualLibraryManager.SyncRecommendations(
-                                user.Id,
-                                recs.Tv,
-                                MediaType.Series);
+                            // Only a user whose folders actually changed needs their libraries scanned.
+                            if (moviesChanged || showsChanged)
+                            {
+                                changedUsers.Add(user.Id);
+                            }
 
                             successfulUsers++;
                             _logger.LogDebug(
@@ -139,7 +139,7 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                 progress?.Report(90);
 
                 // Step 4: Scan the recommendation libraries (90-95% progress)
-                await _libraryService.ScanAsync(cancellationToken).ConfigureAwait(false);
+                await _libraryService.ScanAsync(changedUsers, cancellationToken).ConfigureAwait(false);
 
                 progress?.Report(95);
 

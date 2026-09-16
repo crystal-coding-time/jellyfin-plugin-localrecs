@@ -142,6 +142,22 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             Guid userId,
             IReadOnlyList<ScoredRecommendation> recommendations,
             MediaType mediaType)
+            => SyncRecommendations(userId, recommendations, mediaType, out _);
+
+        /// <summary>
+        /// Clears and recreates recommendations for a user. Thread-safe per user.
+        /// </summary>
+        /// <param name="userId">User ID.</param>
+        /// <param name="recommendations">List of recommended items.</param>
+        /// <param name="mediaType">Media type (Movie or Series).</param>
+        /// <param name="changed">True if any file was written or removed, meaning this user's library needs a scan.</param>
+        /// <returns>Number of items created.</returns>
+        /// <exception cref="ArgumentNullException">Thrown when recommendations is null.</exception>
+        public int SyncRecommendations(
+            Guid userId,
+            IReadOnlyList<ScoredRecommendation> recommendations,
+            MediaType mediaType,
+            out bool changed)
         {
             if (recommendations == null)
             {
@@ -151,15 +167,17 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             var userLock = _userLocks.GetOrAdd(userId, _ => new object());
             lock (userLock)
             {
-                return SyncRecommendationsInternal(userId, recommendations, mediaType);
+                return SyncRecommendationsInternal(userId, recommendations, mediaType, out changed);
             }
         }
 
         private int SyncRecommendationsInternal(
             Guid userId,
             IReadOnlyList<ScoredRecommendation> recommendations,
-            MediaType mediaType)
+            MediaType mediaType,
+            out bool changed)
         {
+            changed = false;
             var libraryPath = GetUserLibraryPath(userId, mediaType);
             Directory.CreateDirectory(libraryPath);
 
@@ -186,11 +204,11 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
 
                     if (item is Series series)
                     {
-                        CreateSeriesStructure(libraryPath, series);
+                        changed |= CreateSeriesStructure(libraryPath, series);
                     }
                     else
                     {
-                        CreateMovieFolderStructure(libraryPath, item);
+                        changed |= CreateMovieFolderStructure(libraryPath, item);
                     }
 
                     var folder = Path.Combine(libraryPath, GenerateFolderName(item));
@@ -218,6 +236,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 if (!keptFolders.Contains(dir))
                 {
                     DeleteFolder(dir);
+                    changed = true;
                 }
             }
 
@@ -266,21 +285,25 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             }
         }
 
-        private void CreateMovieFolderStructure(string libraryPath, BaseItem item)
+        /// <summary>
+        /// Builds a movie's folder. Returns true if anything was written, so only users whose folders
+        /// actually changed need their library scanned afterwards.
+        /// </summary>
+        private bool CreateMovieFolderStructure(string libraryPath, BaseItem item)
         {
             if (string.IsNullOrEmpty(item.Path))
             {
-                return;
+                return false;
             }
 
             var folderName = GenerateFolderName(item);
             var movieFolderPath = Path.Combine(libraryPath, folderName);
             Directory.CreateDirectory(movieFolderPath);
-            WriteNfo(Path.Combine(movieFolderPath, folderName + ".nfo"), "movie", item);
+            var changed = WriteNfo(Path.Combine(movieFolderPath, folderName + ".nfo"), "movie", item);
 
             var extension = Path.GetExtension(item.Path);
             var mediaLinkPath = Path.Combine(movieFolderPath, folderName + extension);
-            CreateSymlink(mediaLinkPath, item.Path);
+            changed |= CreateSymlink(mediaLinkPath, item.Path);
 
             var sourceDir = Path.GetDirectoryName(item.Path);
             var trailerCount = LinkTrailers(movieFolderPath, folderName, sourceDir);
@@ -291,9 +314,11 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 folderName,
                 trailerCount,
                 artworkCount);
+
+            return changed || trailerCount > 0 || artworkCount > 0;
         }
 
-        private void CreateSeriesStructure(string libraryPath, Series series)
+        private bool CreateSeriesStructure(string libraryPath, Series series)
         {
             var seriesFolderName = GenerateFolderName(series);
             var seriesPath = Path.Combine(libraryPath, seriesFolderName);
@@ -306,7 +331,9 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             var seriesSourceDir = series.Path;
             var trailerCount = LinkTrailers(seriesPath, seriesFolderName, seriesSourceDir);
             var artworkCount = LinkItemArtwork(seriesPath, series);
-            WriteNfo(Path.Combine(seriesPath, "tvshow.nfo"), "tvshow", series);
+            var changed = WriteNfo(Path.Combine(seriesPath, "tvshow.nfo"), "tvshow", series)
+                || trailerCount > 0
+                || artworkCount > 0;
 
             var episodes = _libraryManager.GetItemList(new InternalItemsQuery
             {
@@ -322,7 +349,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             if (episodes.Count == 0)
             {
                 _logger.LogDebug("Series {SeriesName} has no episodes, skipping", series.Name);
-                return;
+                return changed;
             }
 
             var episodeCount = 0;
@@ -346,7 +373,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
 
                     try
                     {
-                        CreateSymlink(linkPath, episode.Path);
+                        changed |= CreateSymlink(linkPath, episode.Path);
                         episodeCount++;
                     }
                     catch (UnauthorizedAccessException ex)
@@ -366,18 +393,23 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 episodeCount,
                 trailerCount,
                 artworkCount);
+
+            return changed;
         }
 
         /// <summary>
         /// Creates a symbolic link at <paramref name="linkPath"/> pointing to <paramref name="targetPath"/>.
         /// On Windows, this requires Administrator privileges or Developer Mode enabled.
         /// </summary>
-        private void CreateSymlink(string linkPath, string targetPath)
+        /// <summary>
+        /// Creates the link unless it already points at the target. Returns true if anything was written.
+        /// </summary>
+        private bool CreateSymlink(string linkPath, string targetPath)
         {
             var existing = new FileInfo(linkPath);
             if (existing.LinkTarget == targetPath)
             {
-                return;
+                return false;
             }
 
             // LinkTarget also catches a dangling link, which FileInfo.Exists reports as missing.
@@ -387,6 +419,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             }
 
             File.CreateSymbolicLink(linkPath, targetPath);
+            return true;
         }
 
         private void LogSymlinkPermissionError(UnauthorizedAccessException ex, Guid itemId)
@@ -419,8 +452,10 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                     foreach (var trailer in Directory.GetFiles(sourceTrailersDir))
                     {
                         var linkPath = Path.Combine(targetTrailersDir, Path.GetFileName(trailer));
-                        TryCreateSymlink(linkPath, trailer);
-                        count++;
+                        if (TryCreateSymlink(linkPath, trailer))
+                        {
+                            count++;
+                        }
                     }
                 }
 
@@ -442,8 +477,10 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                         ? $"{baseFilename}-trailer{ext}"
                         : $"{baseFilename}-trailer{i + 1}{ext}";
                     var linkPath = Path.Combine(targetFolder, linkName);
-                    TryCreateSymlink(linkPath, trailer);
-                    count++;
+                    if (TryCreateSymlink(linkPath, trailer))
+                    {
+                        count++;
+                    }
                 }
             }
             catch (Exception ex)
@@ -518,7 +555,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         /// fetch metadata online. For series, tvshow.nfo also makes Jellyfin's scanner reliably identify
         /// the folder as a Series rather than treating its episodes as standalone items.
         /// </summary>
-        private void WriteNfo(string nfoPath, string rootElement, BaseItem item)
+        private bool WriteNfo(string nfoPath, string rootElement, BaseItem item)
         {
             var sb = new StringBuilder();
             sb.AppendLine("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
@@ -573,12 +610,15 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 if (!File.Exists(nfoPath) || File.ReadAllText(nfoPath) != content)
                 {
                     File.WriteAllText(nfoPath, content, new UTF8Encoding(false));
+                    return true;
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to write {NfoPath}", nfoPath);
             }
+
+            return false;
         }
 
         private string XmlEscape(string value)
@@ -596,8 +636,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         {
             try
             {
-                CreateSymlink(linkPath, targetPath);
-                return true;
+                return CreateSymlink(linkPath, targetPath);
             }
             catch (UnauthorizedAccessException ex)
             {

@@ -188,8 +188,15 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 // is created. After this pass nobody has that, so new libraries start out visible to no one,
                 // and the second pass then gives each user their own.
                 await EnsureAccessAsync(users).ConfigureAwait(false);
-                await EnsureLibrariesAsync(users).ConfigureAwait(false);
+                var created = await EnsureLibrariesAsync(users).ConfigureAwait(false);
                 await EnsureAccessAsync(users).ConfigureAwait(false);
+
+                if (created >= 10)
+                {
+                    _logger.LogWarning(
+                        "Created {Count} libraries. Jellyfin restarts its folder watchers for each one, which on Linux can exhaust fs.inotify.max_user_watches and stop file watching on your real libraries until Jellyfin is restarted",
+                        created);
+                }
             }
             finally
             {
@@ -198,19 +205,45 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         }
 
         /// <summary>
-        /// Scans only the recommendation libraries.
+        /// Scans the recommendation libraries of the given users. Scanning every user's libraries on every
+        /// refresh is what made refreshes take longer the more users a server has, so users whose folders
+        /// didn't change are skipped.
         /// </summary>
+        /// <param name="userIds">The users whose recommendations changed.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <returns>A task representing the scans.</returns>
-        public async Task ScanAsync(CancellationToken cancellationToken)
+        public async Task ScanAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken)
         {
+            ArgumentNullException.ThrowIfNull(userIds);
+
+            if (userIds.Count == 0)
+            {
+                _logger.LogInformation("No recommendations changed, skipping library scans");
+                return;
+            }
+
+            // A library's folders are registered when the library is created, and at that point they are
+            // still empty, so Jellyfin skips them ("inaccessible or empty") and a later scan of that library
+            // finds nothing. This re-registers them now that the recommendations have been written.
+            await _libraryManager.ValidateTopLibraryFolders(cancellationToken).ConfigureAwait(false);
+
+            var scanned = 0;
             foreach (var library in GetOwnedLibraries())
             {
+                if (library.Locations.Length != 1
+                    || GetOwner(Normalize(library.Locations[0])) is not Guid owner
+                    || !userIds.Contains(owner))
+                {
+                    continue;
+                }
+
                 if (!Guid.TryParse(library.ItemId, out var itemId)
                     || _libraryManager.GetItemById(itemId) is not CollectionFolder folder)
                 {
                     continue;
                 }
+
+                scanned++;
 
                 // Same path as the dashboard's "Scan library": it refreshes the library itself first, which
                 // picks up a folder that was still empty when the library was created, then scans it.
@@ -220,6 +253,8 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                     new MetadataRefreshOptions(new DirectoryService(_fileSystem)),
                     cancellationToken).ConfigureAwait(false);
             }
+
+            _logger.LogInformation("Scanned {Count} recommendation libraries", scanned);
         }
 
         /// <summary>
@@ -266,7 +301,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             });
         }
 
-        private async Task EnsureLibrariesAsync(List<Jellyfin.Database.Implementations.Entities.User> users)
+        private async Task<int> EnsureLibrariesAsync(List<Jellyfin.Database.Implementations.Entities.User> users)
         {
             var userIds = users.Select(u => u.Id).ToHashSet();
             var byPath = new Dictionary<string, VirtualFolderInfo>(StringComparer.OrdinalIgnoreCase);
@@ -285,6 +320,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 await _libraryManager.RemoveVirtualFolder(library.Name, false).ConfigureAwait(false);
             }
 
+            var created = 0;
             foreach (var user in users)
             {
                 if (!_virtualLibraryManager.EnsureUserDirectoriesExist(user.Id, user.Username))
@@ -315,8 +351,11 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                     var name = GetLibraryName(mediaType, user.Username);
                     await _libraryManager.AddVirtualFolder(name, collectionType, options, false).ConfigureAwait(false);
                     _logger.LogInformation("Created library {LibraryName}", name);
+                    created++;
                 }
             }
+
+            return created;
         }
 
         private async Task EnsureAccessAsync(List<Jellyfin.Database.Implementations.Entities.User> users)
