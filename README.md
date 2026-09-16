@@ -156,6 +156,24 @@ permission to create symbolic links, which is required on Windows.
 
 After either change, run **Dashboard → Scheduled Tasks → Refresh Local Recommendations**.
 
+### New files in your real libraries stop being detected (Linux)
+
+Jellyfin restarts its folder watchers every time a library is created, so setting up many users at once
+can exhaust the kernel's inotify limits. The log shows `Error watching path` or `The configured user
+limit on the number of inotify watches has been reached`, and new files added to your **real** libraries
+are no longer picked up automatically (manual scans still work). The plugin's own libraries never use
+real-time monitoring, so this is a one-off cost of creating the libraries.
+
+**Fix:** restart Jellyfin once after the libraries are created, and raise the limits:
+
+```bash
+echo fs.inotify.max_user_watches=524288 | sudo tee /etc/sysctl.d/40-max-user-watches.conf
+echo fs.inotify.max_user_instances=512 | sudo tee /etc/sysctl.d/50-jellyfin-server.conf
+sudo sysctl --system
+```
+
+On Docker, set these on the host, not inside the container.
+
 ### Transcoded playback fails on Jellyfin 10.11.7+ (plugin versions ≤0.5.3)
 
 Upgrade to **v0.6.0 or later**. Jellyfin 10.11.7 shipped a security fix

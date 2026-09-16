@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.0] - Unreleased
+## [0.9.1] - Unreleased
+
+Supersedes the 0.9.0 pre-release, which shipped the automatic setup below but left watch status stuck, recommendation libraries empty until a manual scan, and refreshes growing with the number of users.
 
 ### Added
 
@@ -20,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Watch status reaches the real item immediately again.** The plugin looked the real item up by path, which builds a fresh copy, while Jellyfin serves requests from its cached copy and reads played state from the copy's own user data. Marking a recommendation played updated the database but the server kept reporting the real item as unwatched until it restarted.
+- **Recommendation libraries no longer stay empty on a fresh install.** Jellyfin registers a library's folders when the library is created, when they are still empty, so nothing was indexed until someone ran a full library scan by hand. The plugin now re-registers them before scanning.
+- **Refreshes no longer get slower as users are added.** Every refresh scanned every user's libraries; with 49 users a second refresh took over half an hour and stalled. Only users whose recommendations changed are scanned, and nothing is scanned when nothing changed.
 - **Startup no longer blocks the server.** Library setup and the play-status sync run in the background after Jellyfin has started; the sync held up startup for ~2.5 minutes on a 50-user server.
 - "Generating recommendations" was logged twice per refresh.
 

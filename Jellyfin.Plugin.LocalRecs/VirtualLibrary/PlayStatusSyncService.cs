@@ -196,8 +196,8 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                         }
 
                         // Find the source and virtual items
-                        var sourceItem = _libraryManager.FindByPath(sourcePath, isFolder: false);
-                        var virtualItem = _libraryManager.FindByPath(linkPath, isFolder: false);
+                        var sourceItem = FindItem(sourcePath);
+                        var virtualItem = FindItem(linkPath);
 
                         if (sourceItem == null || virtualItem == null)
                         {
@@ -306,6 +306,20 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         /// <summary>
         /// Checks if the given path is within the virtual library base path.
         /// </summary>
+        /// <summary>
+        /// Finds an item by path and returns the instance the rest of the server uses.
+        /// FindByPath builds a fresh instance from the database, and Jellyfin reads played state from the
+        /// instance's own user data, so saving against a fresh copy leaves every request that uses the
+        /// cached instance showing the old state until Jellyfin restarts.
+        /// </summary>
+        /// <param name="path">The item's path.</param>
+        /// <returns>The shared item instance, or null when there is no item at that path.</returns>
+        private BaseItem? FindItem(string path)
+        {
+            var item = _libraryManager.FindByPath(path, isFolder: false);
+            return item is null ? null : _libraryManager.GetItemById(item.Id) ?? item;
+        }
+
         private bool IsVirtualLibraryPath(string path)
         {
             if (string.IsNullOrEmpty(path))
@@ -462,7 +476,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 }
 
                 // Find the source item
-                var sourceItem = _libraryManager.FindByPath(sourcePath, isFolder: false);
+                var sourceItem = FindItem(sourcePath);
                 if (sourceItem == null)
                 {
                     return;
@@ -614,7 +628,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 }
 
                 // Find the source item by path
-                var sourceItem = _libraryManager.FindByPath(sourcePath, isFolder: false);
+                var sourceItem = FindItem(sourcePath);
                 if (sourceItem == null)
                 {
                     _logger.LogWarning("Source item not found for path: {Path}", sourcePath);
