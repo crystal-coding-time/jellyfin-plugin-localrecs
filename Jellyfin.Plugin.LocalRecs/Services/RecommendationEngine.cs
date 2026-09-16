@@ -5,6 +5,8 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.LocalRecs.Configuration;
 using Jellyfin.Plugin.LocalRecs.Models;
 using Jellyfin.Plugin.LocalRecs.Utilities;
+using Jellyfin.Plugin.LocalRecs.VirtualLibrary;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -165,11 +167,15 @@ namespace Jellyfin.Plugin.LocalRecs.Services
         /// <returns>HashSet of accessible item IDs.</returns>
         private HashSet<Guid> GetUserAccessibleItemIds(Jellyfin.Database.Implementations.Entities.User user)
         {
-            var accessibleItems = _libraryManager.GetItemList(new InternalItemsQuery(user)
+            // Ids only, from the real libraries: this runs once per user, and hydrating every item
+            // (with its images and user data) just to read the ids was the bulk of a refresh.
+            var accessibleItems = _libraryManager.GetItemIds(new InternalItemsQuery(user)
             {
                 IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Series },
                 IsVirtualItem = false,
-                Recursive = true
+                Recursive = true,
+                TopParentIds = RecommendationLibraries.GetRealLibraryIds(_libraryManager),
+                DtoOptions = new DtoOptions(false) { EnableImages = false, EnableUserData = false }
             });
 
             if (accessibleItems == null)
@@ -177,7 +183,7 @@ namespace Jellyfin.Plugin.LocalRecs.Services
                 return new HashSet<Guid>();
             }
 
-            return accessibleItems.Select(i => i.Id).ToHashSet();
+            return accessibleItems.ToHashSet();
         }
 
         /// <summary>
@@ -310,13 +316,14 @@ namespace Jellyfin.Plugin.LocalRecs.Services
         private bool HasAnyWatchedEpisodes(Series series, Jellyfin.Database.Implementations.Entities.User user)
         {
             // Query for any watched episodes in this series
-            var watchedEpisodes = _libraryManager.GetItemList(new InternalItemsQuery(user)
+            var watchedEpisodes = _libraryManager.GetItemIds(new InternalItemsQuery(user)
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
                 AncestorIds = new[] { series.Id },
                 IsPlayed = true,
                 Limit = 1, // We only need to know if any exist
-                Recursive = true
+                Recursive = true,
+                DtoOptions = new DtoOptions(false) { EnableImages = false, EnableUserData = false }
             });
 
             return watchedEpisodes.Count > 0;

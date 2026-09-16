@@ -88,7 +88,8 @@ namespace Jellyfin.Plugin.LocalRecs.ScheduledTasks
                 var userIds = users.Select(u => u.Id).ToList();
                 var userRecommendations = await _refreshService.GenerateRecommendationsForMultipleUsersAsync(
                     userIds,
-                    config).ConfigureAwait(false);
+                    config,
+                    (done, total) => progress?.Report(5 + (75.0 * done / total))).ConfigureAwait(false);
 
                 progress?.Report(80);
 

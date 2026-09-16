@@ -55,6 +55,10 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             // Default: all registered items are accessible (tests override via SetupUserVisibleItems)
             _mockLibraryManager.Setup(m => m.GetItemList(It.IsAny<InternalItemsQuery>()))
                 .Returns(() => _registeredItems);
+
+            // The access check asks for ids only, so it has the same answer in id form.
+            _mockLibraryManager.Setup(m => m.GetItemIds(It.IsAny<InternalItemsQuery>()))
+                .Returns(() => _registeredItems.Select(i => i.Id).ToList());
         }
 
         [Fact]
@@ -666,6 +670,8 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             // When GetItemList is called with any query (user-scoped), return only visible items
             _mockLibraryManager.Setup(m => m.GetItemList(It.IsAny<InternalItemsQuery>()))
                 .Returns(baseItems);
+            _mockLibraryManager.Setup(m => m.GetItemIds(It.IsAny<InternalItemsQuery>()))
+                .Returns(baseItems.Select(i => i.Id).ToList());
         }
 
         #region Library Access Filtering Tests

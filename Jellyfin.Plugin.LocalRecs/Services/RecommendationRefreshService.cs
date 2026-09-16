@@ -138,10 +138,12 @@ namespace Jellyfin.Plugin.LocalRecs.Services
         /// </summary>
         /// <param name="userIds">List of user IDs to process.</param>
         /// <param name="config">Plugin configuration.</param>
+        /// <param name="onUserCompleted">Called after each user with (completed, total), for progress reporting.</param>
         /// <returns>Dictionary mapping user IDs to their recommendations (movies, TV).</returns>
         public Task<Dictionary<Guid, (List<ScoredRecommendation> Movies, List<ScoredRecommendation> Tv)>> GenerateRecommendationsForMultipleUsersAsync(
             IReadOnlyList<Guid> userIds,
-            PluginConfiguration config)
+            PluginConfiguration config,
+            Action<int, int>? onUserCompleted = null)
         {
             var results = new Dictionary<Guid, (List<ScoredRecommendation> Movies, List<ScoredRecommendation> Tv)>();
 
@@ -159,6 +161,10 @@ namespace Jellyfin.Plugin.LocalRecs.Services
             {
                 var recs = GenerateRecommendationsForUser(userId, embeddings, metadata, config);
                 results[userId] = recs;
+
+                // Reported per user: on a large server this loop is most of a refresh, and without it
+                // the task sits at one percentage for many minutes and looks hung.
+                onUserCompleted?.Invoke(results.Count, userIds.Count);
             }
 
             _logger.LogInformation("Successfully generated recommendations for {Count}/{Total} users", results.Count, userIds.Count);

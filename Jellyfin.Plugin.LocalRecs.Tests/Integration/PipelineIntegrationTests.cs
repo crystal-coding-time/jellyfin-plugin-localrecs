@@ -30,6 +30,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Integration
         private readonly PluginConfiguration _config;
         private readonly Guid _testUserId;
         private readonly User _testUser;
+        private readonly Dictionary<Guid, UserItemData> _userDataByItemId = new Dictionary<Guid, UserItemData>();
 
         public PipelineIntegrationTests()
         {
@@ -40,6 +41,14 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Integration
             _testUserId = Guid.NewGuid();
             _testUser = new User("TestUser", "Default", "Default");
             _mockUserManager.Setup(m => m.GetUserById(_testUserId)).Returns(_testUser);
+
+            // The profile builder reads user data in one batch; SetupUserDataMocks records each
+            // item's data here so the batch answers with exactly what the per-item setups describe.
+            _mockUserDataManager
+                .Setup(m => m.GetUserDataBatch(It.IsAny<IReadOnlyList<BaseItem>>(), It.IsAny<User>()))
+                .Returns((IReadOnlyList<BaseItem> items, User user)
+                    => items.Where(i => _userDataByItemId.ContainsKey(i.Id))
+                        .ToDictionary(i => i.Id, i => _userDataByItemId[i.Id]));
 
             _config = new PluginConfiguration
             {
@@ -675,39 +684,28 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Integration
                 allBaseItems.Add(mockItem.Object);
 
                 var watch = watchHistory.FirstOrDefault(w => w.Item.Id == item.Id);
-                if (watchedItemIds.Contains(item.Id))
+                var isWatched = watchedItemIds.Contains(item.Id);
+                var userData = new UserItemData
                 {
-                    var userData = new UserItemData
-                    {
-                        Key = item.Id.ToString(),
-                        Played = true,
-                        IsFavorite = watch.IsFavorite,
-                        PlayCount = watch.PlayCount,
-                        LastPlayedDate = DateTime.UtcNow.AddDays(-watch.DaysAgo)
-                    };
+                    Key = item.Id.ToString(),
+                    Played = isWatched,
+                    IsFavorite = isWatched && watch.IsFavorite,
+                    PlayCount = isWatched ? watch.PlayCount : 0,
+                    LastPlayedDate = isWatched ? DateTime.UtcNow.AddDays(-watch.DaysAgo) : (DateTime?)null
+                };
 
-                    // Match on the specific mock item returned by GetItemById
-                    _mockUserDataManager.Setup(m => m.GetUserData(_testUser, mockItem.Object))
-                        .Returns(userData);
-                }
-                else
-                {
-                    var userData = new UserItemData
-                    {
-                        Key = item.Id.ToString(),
-                        Played = false,
-                        IsFavorite = false,
-                        PlayCount = 0
-                    };
-
-                    _mockUserDataManager.Setup(m => m.GetUserData(_testUser, mockItem.Object))
-                        .Returns(userData);
-                }
+                // Match on the specific mock item returned by GetItemById; the dictionary feeds
+                // the batch lookup the profile builder actually uses.
+                _userDataByItemId[item.Id] = userData;
+                _mockUserDataManager.Setup(m => m.GetUserData(_testUser, mockItem.Object))
+                    .Returns(userData);
             }
 
             // Setup user-scoped library access: all items are accessible by default
             _mockLibraryManager.Setup(m => m.GetItemList(It.IsAny<InternalItemsQuery>()))
                 .Returns(allBaseItems);
+            _mockLibraryManager.Setup(m => m.GetItemIds(It.IsAny<InternalItemsQuery>()))
+                .Returns(allBaseItems.Select(i => i.Id).ToList());
         }
 
         private List<MediaItemMetadata> GenerateScalableLibrary(int count)

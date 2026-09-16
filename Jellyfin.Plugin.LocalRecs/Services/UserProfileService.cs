@@ -5,6 +5,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.LocalRecs.Configuration;
 using Jellyfin.Plugin.LocalRecs.Models;
 using Jellyfin.Plugin.LocalRecs.Utilities;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -129,18 +130,25 @@ namespace Jellyfin.Plugin.LocalRecs.Services
             }
 
             var itemIdSet = availableItemIds.ToHashSet();
-
-            foreach (var itemId in itemIdSet)
+            var items = new List<BaseItem>(itemIdSet.Count);
+            foreach (var id in itemIdSet)
             {
-                var item = _libraryManager.GetItemById(itemId);
-                if (item == null)
+                var libraryItem = _libraryManager.GetItemById(id);
+                if (libraryItem != null)
                 {
-                    continue;
+                    items.Add(libraryItem);
                 }
+            }
 
-                var userData = _userDataManager.GetUserData(user, item);
+            // One batch instead of a lookup per item: with thousands of items and dozens of users, the
+            // per-item user data lookups were most of a refresh.
+            var userDataByItemId = _userDataManager.GetUserDataBatch(items, user)
+                ?? new Dictionary<Guid, UserItemData>();
 
-                if (userData == null)
+            foreach (var item in items)
+            {
+                var itemId = item.Id;
+                if (!userDataByItemId.TryGetValue(itemId, out var userData) || userData == null)
                 {
                     continue;
                 }
@@ -194,7 +202,8 @@ namespace Jellyfin.Plugin.LocalRecs.Services
                 IsPlayed = true,
                 Recursive = true,
                 OrderBy = new[] { (ItemSortBy.DatePlayed, Jellyfin.Database.Implementations.Enums.SortOrder.Descending) },
-                Limit = 1
+                Limit = 1,
+                DtoOptions = new DtoOptions(false) { EnableUserData = true }
             });
 
             if (result.Count == 0)

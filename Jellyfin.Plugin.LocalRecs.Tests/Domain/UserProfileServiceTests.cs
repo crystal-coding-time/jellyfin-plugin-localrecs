@@ -29,6 +29,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
         private readonly PluginConfiguration _config;
         private readonly Guid _testUserId;
         private readonly User _testUser;
+        private readonly Dictionary<Guid, UserItemData> _userDataByItemId = new Dictionary<Guid, UserItemData>();
 
         public UserProfileServiceTests()
         {
@@ -54,6 +55,14 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
 
             // Setup user manager to return test user
             _mockUserManager.Setup(m => m.GetUserById(_testUserId)).Returns(_testUser);
+
+            // The profile builder reads user data in one batch; StubUserData records each item's data
+            // so the batch answers with exactly what the per-item setups describe.
+            _mockUserDataManager
+                .Setup(m => m.GetUserDataBatch(It.IsAny<IReadOnlyList<BaseItem>>(), It.IsAny<User>()))
+                .Returns((IReadOnlyList<BaseItem> items, User user)
+                    => items.Where(i => _userDataByItemId.ContainsKey(i.Id))
+                        .ToDictionary(i => i.Id, i => _userDataByItemId[i.Id]));
         }
 
         [Fact]
@@ -261,15 +270,14 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             foreach (var item in library.Skip(3).Take(2))
             {
                 var mockItem = new Mock<BaseItem>();
+                mockItem.Object.Id = item.Id;
                 _mockLibraryManager.Setup(m => m.GetItemById(item.Id)).Returns(mockItem.Object);
 
-                var userData = new UserItemData
+                StubUserData(mockItem.Object, new UserItemData
                 {
                     Key = item.Id.ToString(),
                     Played = false // Not played
-                };
-                _mockUserDataManager.Setup(m => m.GetUserData(_testUser, mockItem.Object))
-                    .Returns(userData);
+                });
             }
 
             // Act
@@ -431,6 +439,14 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             }
         }
 
+        // Records an item's user data for both lookup shapes the code uses: the per-item
+        // GetUserData and the batch built from the dictionary in the constructor.
+        private void StubUserData(BaseItem item, UserItemData data)
+        {
+            _userDataByItemId[item.Id] = data;
+            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, item)).Returns(data);
+        }
+
         private void SetupSpecificUserData(
             MediaItemMetadata item,
             bool isFavorite,
@@ -440,6 +456,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             // Create a minimal mock BaseItem - we can't mock Id since it's not virtual
             // So we'll just return any BaseItem and match on it being called with that item ID
             var mockItem = new Mock<BaseItem>();
+            mockItem.Object.Id = item.Id;
 
             _mockLibraryManager.Setup(m => m.GetItemById(item.Id)).Returns(mockItem.Object);
 
@@ -453,9 +470,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
                 LastPlayedDate = DateTime.UtcNow.AddDays(-daysAgo)
             };
 
-            // Match on the specific mock item returned by GetItemById
-            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, mockItem.Object))
-                .Returns(userData);
+            StubUserData(mockItem.Object, userData);
         }
 
         // Sets up a Series whose single watched episode was last played a given number of
@@ -477,7 +492,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
                 IsFavorite = isFavorite,
                 Played = false
             };
-            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, series)).Returns(seriesUserData);
+            StubUserData(series, seriesUserData);
 
             // The episode query (AncestorIds = [series.Id], IsPlayed, ordered by DatePlayed) returns one episode.
             var episode = new Episode { Id = Guid.NewGuid(), Name = seriesMeta.Name + " S01E01" };
@@ -492,7 +507,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
                 Played = true,
                 LastPlayedDate = DateTime.UtcNow.AddDays(-episodeDaysAgo)
             };
-            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, episode)).Returns(episodeUserData);
+            StubUserData(episode, episodeUserData);
         }
 
         // Sets up a Series with no watched episodes (the episode query returns an empty list).
@@ -506,7 +521,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
                 Key = seriesMeta.Id.ToString(),
                 Played = false
             };
-            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, series)).Returns(seriesUserData);
+            StubUserData(series, seriesUserData);
 
             _mockLibraryManager
                 .Setup(m => m.GetItemList(It.Is<InternalItemsQuery>(q =>

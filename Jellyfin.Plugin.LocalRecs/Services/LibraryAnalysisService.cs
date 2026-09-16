@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.LocalRecs.Models;
+using Jellyfin.Plugin.LocalRecs.VirtualLibrary;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
@@ -44,12 +45,18 @@ namespace Jellyfin.Plugin.LocalRecs.Services
             {
                 var items = new List<MediaItemMetadata>();
 
+                // Only the real libraries: recommendations are copies of items that are already here, and
+                // once every user has a set they outnumber the originals, so a query that includes them
+                // gets slower after every refresh. Scoped the way Jellyfin scopes its own library queries.
+                var realLibraries = RecommendationLibraries.GetRealLibraryIds(_libraryManager);
+
                 // Get all movies
                 var movies = _libraryManager.GetItemList(new InternalItemsQuery
                 {
                     IncludeItemTypes = new[] { BaseItemKind.Movie },
                     IsVirtualItem = false,
-                    Recursive = true
+                    Recursive = true,
+                    TopParentIds = realLibraries
                 });
 
                 foreach (var movie in movies.OfType<Movie>())
@@ -66,7 +73,8 @@ namespace Jellyfin.Plugin.LocalRecs.Services
                 {
                     IncludeItemTypes = new[] { BaseItemKind.Series },
                     IsVirtualItem = false,
-                    Recursive = true
+                    Recursive = true,
+                    TopParentIds = realLibraries
                 });
 
                 foreach (var show in series.OfType<Series>())
