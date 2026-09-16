@@ -5,6 +5,7 @@ using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.LocalRecs.Configuration;
 using Jellyfin.Plugin.LocalRecs.Models;
 using Jellyfin.Plugin.LocalRecs.Utilities;
+using Jellyfin.Plugin.LocalRecs.VirtualLibrary;
 using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
@@ -145,6 +146,9 @@ namespace Jellyfin.Plugin.LocalRecs.Services
             var userDataByItemId = _userDataManager.GetUserDataBatch(items, user)
                 ?? new Dictionary<Guid, UserItemData>();
 
+            // Likewise one query for every series the user has watched, rather than one per series.
+            var lastWatchedBySeries = GetLastWatchedEpisodeDates(user);
+
             foreach (var item in items)
             {
                 var itemId = item.Id;
@@ -158,13 +162,12 @@ namespace Jellyfin.Plugin.LocalRecs.Services
                 DateTime lastPlayedDate;
                 if (item is Series series)
                 {
-                    var seriesLastPlayed = GetLastWatchedEpisodeDate(series, user);
-                    if (seriesLastPlayed == null)
+                    if (!lastWatchedBySeries.TryGetValue(series.Id, out var seriesLastPlayed))
                     {
                         continue;
                     }
 
-                    lastPlayedDate = seriesLastPlayed.Value;
+                    lastPlayedDate = seriesLastPlayed;
                 }
                 else if (!userData.Played)
                 {
@@ -190,29 +193,51 @@ namespace Jellyfin.Plugin.LocalRecs.Services
         }
 
         /// <summary>
-        /// Returns the most recent LastPlayedDate across watched episodes of a series,
-        /// or null if no episodes have been watched.
+        /// Returns the most recent LastPlayedDate per series, across every episode the user has watched.
         /// </summary>
-        private DateTime? GetLastWatchedEpisodeDate(Series series, Jellyfin.Database.Implementations.Entities.User user)
+        /// <remarks>
+        /// One query for the user instead of one per series: the per-series form scaled with users x
+        /// series and grew more expensive as the plugin's own recommendations filled the database.
+        /// </remarks>
+        private Dictionary<Guid, DateTime> GetLastWatchedEpisodeDates(Jellyfin.Database.Implementations.Entities.User user)
         {
-            var result = _libraryManager.GetItemList(new InternalItemsQuery(user)
+            var lastPlayed = new Dictionary<Guid, DateTime>();
+
+            var episodes = _libraryManager.GetItemList(new InternalItemsQuery(user)
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
-                AncestorIds = new[] { series.Id },
                 IsPlayed = true,
                 Recursive = true,
-                OrderBy = new[] { (ItemSortBy.DatePlayed, Jellyfin.Database.Implementations.Enums.SortOrder.Descending) },
-                Limit = 1,
+                TopParentIds = RecommendationLibraries.GetRealLibraryIds(_libraryManager),
                 DtoOptions = new DtoOptions(false) { EnableUserData = true }
             });
 
-            if (result.Count == 0)
+            if (episodes == null || episodes.Count == 0)
             {
-                return null;
+                return lastPlayed;
             }
 
-            var epData = _userDataManager.GetUserData(user, result[0]);
-            return epData?.LastPlayedDate ?? DateTime.UtcNow;
+            var episodeItems = episodes.Where(e => e is Episode).ToList();
+            var episodeData = _userDataManager.GetUserDataBatch(episodeItems, user)
+                ?? new Dictionary<Guid, UserItemData>();
+
+            foreach (var item in episodeItems)
+            {
+                var episode = (Episode)item;
+                if (episode.SeriesId == Guid.Empty)
+                {
+                    continue;
+                }
+
+                episodeData.TryGetValue(episode.Id, out var data);
+                var played = data?.LastPlayedDate ?? DateTime.UtcNow;
+                if (!lastPlayed.TryGetValue(episode.SeriesId, out var existing) || played > existing)
+                {
+                    lastPlayed[episode.SeriesId] = played;
+                }
+            }
+
+            return lastPlayed;
         }
 
         /// <summary>

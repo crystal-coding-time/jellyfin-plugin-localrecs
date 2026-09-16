@@ -9,6 +9,7 @@ using Jellyfin.Plugin.LocalRecs.Models;
 using Jellyfin.Plugin.LocalRecs.Services;
 using Jellyfin.Plugin.LocalRecs.Tests.Fixtures;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -673,6 +674,101 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             _mockLibraryManager.Setup(m => m.GetItemIds(It.IsAny<InternalItemsQuery>()))
                 .Returns(baseItems.Select(i => i.Id).ToList());
         }
+
+        #region Series Watch History Tests
+
+        // The engine asks once per user which series that user has watched an episode of, and tests
+        // membership in memory. Nothing else covers that: the other helpers register Mock<BaseItem>,
+        // which never satisfies "item is Series", so the exclusion branch never ran in a test before.
+
+        [Fact]
+        public void GenerateRecommendations_ExcludesSeriesWithAWatchedEpisode()
+        {
+            // Arrange
+            var library = TestMediaLibrary.CreateTestSeries();
+            var embeddings = CreateEmbeddings(library);
+            var metadata = library.ToDictionary(i => i.Id, i => i);
+
+            foreach (var series in library)
+            {
+                SetupSeriesItem(series);
+            }
+
+            // The user has watched one episode of the first series and nothing else.
+            var watchedSeries = library[0];
+            SetupWatchedEpisode(watchedSeries.Id);
+
+            var profile = CreateGenericUserProfile(embeddings, library.Take(3).Select(i => i.Id));
+
+            // Act
+            var recommendations = _engine.GenerateRecommendations(
+                _testUserId, profile, embeddings, metadata, _config, MediaType.Series, 10);
+
+            // Assert
+            recommendations.Select(r => r.ItemId).Should().NotContain(
+                watchedSeries.Id,
+                "a series the user has already started must not be recommended back to them");
+            recommendations.Should().NotBeEmpty("the other series have no watch history and stay eligible");
+        }
+
+        [Fact]
+        public void GenerateRecommendations_SeriesWithNoWatchedEpisodes_StayEligible()
+        {
+            // Arrange
+            var library = TestMediaLibrary.CreateTestSeries();
+            var embeddings = CreateEmbeddings(library);
+            var metadata = library.ToDictionary(i => i.Id, i => i);
+
+            foreach (var series in library)
+            {
+                SetupSeriesItem(series);
+            }
+
+            // No episodes are played at all.
+            var profile = CreateGenericUserProfile(embeddings, library.Take(3).Select(i => i.Id));
+
+            // Act
+            var recommendations = _engine.GenerateRecommendations(
+                _testUserId, profile, embeddings, metadata, _config, MediaType.Series, 10);
+
+            // Assert
+            recommendations.Should().HaveCount(
+                library.Count,
+                "with no watched episodes anywhere, no series should be excluded");
+        }
+
+        /// <summary>
+        /// Registers a real Series instance, which the engine's "item is Series" check requires.
+        /// </summary>
+        private void SetupSeriesItem(MediaItemMetadata item)
+        {
+            var series = new Series { Id = item.Id, Name = item.Name };
+            _mockLibraryManager.Setup(m => m.GetItemById(item.Id)).Returns(series);
+            _registeredItems.Add(series);
+
+            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, series))
+                .Returns(new UserItemData { Key = item.Id.ToString(), Played = false });
+        }
+
+        /// <summary>
+        /// Adds a played episode belonging to a series. The engine finds it through the single
+        /// per-user "played episodes" query and maps it back via SeriesId.
+        /// </summary>
+        private void SetupWatchedEpisode(Guid seriesId)
+        {
+            var episode = new Episode
+            {
+                Id = Guid.NewGuid(),
+                Name = "Episode 1",
+                SeriesId = seriesId
+            };
+
+            _registeredItems.Add(episode);
+            _mockUserDataManager.Setup(m => m.GetUserData(_testUser, episode))
+                .Returns(new UserItemData { Key = episode.Id.ToString(), Played = true });
+        }
+
+        #endregion
 
         #region Library Access Filtering Tests
 

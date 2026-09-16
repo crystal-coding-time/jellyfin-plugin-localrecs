@@ -218,6 +218,11 @@ namespace Jellyfin.Plugin.LocalRecs.Services
                 userId,
                 accessibleItemIds.Count);
 
+            // Resolved once per user rather than once per candidate series. Movies never consult it.
+            var seriesWithWatchedEpisodes = mediaType == LocalMediaType.Movie
+                ? new HashSet<Guid>()
+                : GetSeriesWithWatchedEpisodes(user);
+
             var candidates = new List<Guid>();
 
             foreach (var itemId in availableItemIds)
@@ -274,7 +279,7 @@ namespace Jellyfin.Plugin.LocalRecs.Services
                 if (itemMetadata.Type == LocalMediaType.Series && item is Series series)
                 {
                     // Exclude series with any watched episodes (both in-progress and fully watched)
-                    if (HasAnyWatchedEpisodes(series, user))
+                    if (seriesWithWatchedEpisodes.Contains(series.Id))
                     {
                         _logger.LogDebug(
                             "Excluding series with watch history: {Name}",
@@ -306,27 +311,43 @@ namespace Jellyfin.Plugin.LocalRecs.Services
         }
 
         /// <summary>
-        /// Checks if a series has any watched episodes.
-        /// Series with any watch history (in-progress or fully watched) should be excluded
-        /// from recommendations since the user has already engaged with them.
+        /// Gets the series a user has watched at least one episode of. Series with any watch history
+        /// (in-progress or fully watched) are excluded from recommendations.
         /// </summary>
-        /// <param name="series">The series to check.</param>
+        /// <remarks>
+        /// One query per user, not one per candidate series. The per-series form was 98% of a refresh
+        /// once the plugin's own recommendations were in the database: 300 candidate series across 50
+        /// users is 15,000 queries, and every one of them got slower as recommendation copies
+        /// accumulated, so a second refresh cost several times the first.
+        /// </remarks>
         /// <param name="user">The user to check watch status for.</param>
-        /// <returns>True if the series has at least one watched episode.</returns>
-        private bool HasAnyWatchedEpisodes(Series series, Jellyfin.Database.Implementations.Entities.User user)
+        /// <returns>The ids of series with at least one watched episode.</returns>
+        private HashSet<Guid> GetSeriesWithWatchedEpisodes(Jellyfin.Database.Implementations.Entities.User user)
         {
-            // Query for any watched episodes in this series
-            var watchedEpisodes = _libraryManager.GetItemIds(new InternalItemsQuery(user)
+            var watchedEpisodes = _libraryManager.GetItemList(new InternalItemsQuery(user)
             {
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
-                AncestorIds = new[] { series.Id },
                 IsPlayed = true,
-                Limit = 1, // We only need to know if any exist
                 Recursive = true,
+                TopParentIds = RecommendationLibraries.GetRealLibraryIds(_libraryManager),
                 DtoOptions = new DtoOptions(false) { EnableImages = false, EnableUserData = false }
             });
 
-            return watchedEpisodes.Count > 0;
+            var seriesIds = new HashSet<Guid>();
+            if (watchedEpisodes == null)
+            {
+                return seriesIds;
+            }
+
+            foreach (var episode in watchedEpisodes.OfType<Episode>())
+            {
+                if (episode.SeriesId != Guid.Empty)
+                {
+                    seriesIds.Add(episode.SeriesId);
+                }
+            }
+
+            return seriesIds;
         }
 
         /// <summary>

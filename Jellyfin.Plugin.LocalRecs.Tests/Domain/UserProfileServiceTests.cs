@@ -30,6 +30,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
         private readonly Guid _testUserId;
         private readonly User _testUser;
         private readonly Dictionary<Guid, UserItemData> _userDataByItemId = new Dictionary<Guid, UserItemData>();
+        private readonly List<BaseItem> _watchedEpisodes = new List<BaseItem>();
 
         public UserProfileServiceTests()
         {
@@ -63,6 +64,12 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
                 .Returns((IReadOnlyList<BaseItem> items, User user)
                     => items.Where(i => _userDataByItemId.ContainsKey(i.Id))
                         .ToDictionary(i => i.Id, i => _userDataByItemId[i.Id]));
+
+            // Series recency comes from one query for everything this user has played, grouped by
+            // SeriesId, instead of a query per series. The helpers below fill this list.
+            _mockLibraryManager
+                .Setup(m => m.GetItemList(It.Is<InternalItemsQuery>(q => q.IsPlayed == true)))
+                .Returns(() => _watchedEpisodes);
         }
 
         [Fact]
@@ -494,12 +501,15 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             };
             StubUserData(series, seriesUserData);
 
-            // The episode query (AncestorIds = [series.Id], IsPlayed, ordered by DatePlayed) returns one episode.
-            var episode = new Episode { Id = Guid.NewGuid(), Name = seriesMeta.Name + " S01E01" };
-            _mockLibraryManager
-                .Setup(m => m.GetItemList(It.Is<InternalItemsQuery>(q =>
-                    q.AncestorIds != null && q.AncestorIds.Contains(seriesMeta.Id))))
-                .Returns(new List<BaseItem> { episode });
+            // The profile builder asks once for everything the user has played and groups by SeriesId,
+            // so the episode has to carry the series it belongs to.
+            var episode = new Episode
+            {
+                Id = Guid.NewGuid(),
+                Name = seriesMeta.Name + " S01E01",
+                SeriesId = seriesMeta.Id
+            };
+            _watchedEpisodes.Add(episode);
 
             var episodeUserData = new UserItemData
             {
@@ -523,10 +533,7 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Domain
             };
             StubUserData(series, seriesUserData);
 
-            _mockLibraryManager
-                .Setup(m => m.GetItemList(It.Is<InternalItemsQuery>(q =>
-                    q.AncestorIds != null && q.AncestorIds.Contains(seriesMeta.Id))))
-                .Returns(new List<BaseItem>());
+            // Nothing goes into the watched-episode list: that is what "no watched episodes" means now.
         }
     }
 }
