@@ -8,7 +8,7 @@ Privacy-first personalized recommendations for Jellyfin based entirely on local 
 > [!NOTE]
 > This is the Jellyfin 12 fork of [rdpharr/jellyfin-plugin-localrecs](https://github.com/rdpharr/jellyfin-plugin-localrecs), which is not being updated for Jellyfin 12.
 
-Please report any issues or feedback on [GitHub Issues](https://github.com/rdpharr/jellyfin-plugin-localrecs/issues).
+Please report any issues or feedback for this fork on [GitHub Issues](https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/issues).
 
 > ⚠️ **Windows hosts:** As of v0.6.0, this plugin creates filesystem symlinks to expose recommendations. On Windows, symlink creation requires either **running Jellyfin as Administrator** or **enabling Windows Developer Mode** (Settings → Privacy & security → For developers → Developer Mode). Without one of these, recommendation refreshes will log "Access denied creating symlink" and the virtual libraries will be empty. Docker-on-Linux and native Linux deployments are unaffected. See [Troubleshooting](#troubleshooting) below.
 
@@ -205,9 +205,9 @@ Contributions are welcome. See [DESIGN.md](DESIGN.md) for technical details and 
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/rdpharr/jellyfin-plugin-localrecs/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/rdpharr/jellyfin-plugin-localrecs/discussions)
+- **Issues:** [GitHub Issues](https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/issues)
 - **Documentation:** [DESIGN.md](DESIGN.md)
+- **Upstream project:** [rdpharr/jellyfin-plugin-localrecs](https://github.com/rdpharr/jellyfin-plugin-localrecs) — the Jellyfin 10.11 original, for issues that are not specific to this fork
 
 ## License
 

@@ -4,7 +4,7 @@
     "name": "Local Recommendations",
     "overview": "Privacy-first personalized recommendations based on local watch history",
     "description": "Generate per-user content recommendations using TF-IDF embeddings and cosine similarity. All processing happens locally with zero tracking or cloud dependencies. Recommendations appear as virtual libraries accessible from all Jellyfin clients.",
-    "owner": "rdpharr",
+    "owner": "crystal-coding-time",
     "category": "General",
     "versions": [
       {

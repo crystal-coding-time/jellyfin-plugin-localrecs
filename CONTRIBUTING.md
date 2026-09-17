@@ -144,9 +144,9 @@ Jellyfin.Plugin.LocalRecs.Tests/
 
 ## Need Help?
 
-- Browse [existing issues](https://github.com/rdpharr/jellyfin-plugin-localrecs/issues)
+- Browse [existing issues](https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/issues)
 - Check [DESIGN.md](DESIGN.md) for architectural details
-- Start a [Discussion](https://github.com/rdpharr/jellyfin-plugin-localrecs/discussions)
+- For the Jellyfin 10.11 original, see [rdpharr/jellyfin-plugin-localrecs](https://github.com/rdpharr/jellyfin-plugin-localrecs)
 
 ## License
 
