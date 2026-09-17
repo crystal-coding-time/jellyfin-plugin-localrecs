@@ -384,16 +384,20 @@ siblings) is handled by symlinking the trailer files by name — no custom scann
 - **No watch event handling:** Simplicity over real-time updates
 
 **Scheduled Task Flow:**
-1. Compute fresh embeddings for all library items
-2. Generate recommendations for all users based on current watch history
-3. Clear old symlinks and create new ones for each user
-4. Log instructions for manual library scan (automatic scanning disabled due to scan-timing issues)
+1. Ensure every user has their own two recommendation libraries, and the library access to see only those
+2. Compute fresh embeddings for all library items
+3. Generate recommendations for all users based on current watch history
+4. Write each user's folders incrementally: unchanged recommendations stay in place, NFOs are rewritten only when their content changes, and links whose source file is gone are removed
+5. Scan the recommendation libraries of users whose folders changed, plus any library still holding items Jellyfin has never refreshed
 
-**Note:** Automatic library scanning is intentionally disabled. Users should manually scan their recommendation libraries or rely on scheduled library scans.
+**Note:** The plugin scans its own libraries; no manual scan is needed. Users whose folders did not change are skipped, which is what keeps a repeat refresh cheap. A library holding never-refreshed items is always scanned: an item created by a library validation pass never had its NFO or artwork read, and nothing would ever rewrite its files to make it look changed again.
 
 ## Jellyfin API Constraints
 
 ### What the Plugin Can Do
+- ✅ Create and remove Jellyfin libraries via `ILibraryManager.AddVirtualFolder` / `RemoveVirtualFolder`
+- ✅ Set each user's library access via `IUserManager.UpdatePolicyAsync`
+- ✅ Scan its own libraries via `IProviderManager.RefreshFullItem`
 - ✅ Query library items via `ILibraryManager`
 - ✅ Query user data (watch history, favorites) via `IUserDataManager`
 - ✅ Create directories in plugin data folder
@@ -401,24 +405,16 @@ siblings) is handled by symlinking the trailer files by name — no custom scann
 - ✅ Provide configuration UI (HTML/JavaScript)
 
 ### What the Plugin Cannot Do
-- ❌ **Create Jellyfin libraries programmatically** - No API exists for library creation
-- ❌ **Assign library permissions programmatically** - Permission management is admin-only
 - ❌ **Inject items into existing libraries** - Libraries are tied to physical directories
 - ❌ **Create custom UI sections** - Limited to plugin configuration pages
 
 ### Design Workarounds
 
-**Problem:** Cannot create libraries automatically  
-**Solution:** Plugin creates directories and provides clear setup instructions in:
-- Jellyfin logs (at startup)
-- Plugin configuration UI (Setup tab with copy-paste workflow)
-- README documentation
+**Problem:** Recommendations must be visible to exactly one user
+**Solution:** Each user gets their own pair of libraries under their own directory, and the plugin manages every user's enabled-folder list so a library is never visible to anyone else. A user on "access all libraries" is converted to an explicit list, because that setting cannot hide anything.
 
-**Problem:** Cannot assign permissions automatically  
-**Solution:** Leverage Jellyfin's built-in library access control:
-- Each user gets their own physical directory
-- Admin manually assigns permissions per user
-- Per-user isolation is handled by Jellyfin itself
+**Problem:** A library's folders are registered when the library is created, while they are still empty
+**Solution:** Re-register the top library folders before scanning, once the recommendations have been written.
 
 **Problem:** Limited UI extensibility  
 **Solution:** Rich configuration page with tabs:
@@ -428,13 +424,11 @@ siblings) is handled by symlinking the trailer files by name — no custom scann
 
 ## Data Flow
 
-### Initial Setup (One-Time, Manual)
+### Initial Setup (Automatic)
 1. Admin installs plugin
-2. Plugin creates per-user directories in plugin data folder
-3. Plugin logs setup instructions with exact paths
-4. Admin creates Jellyfin libraries pointing to plugin directories (manual)
-5. Admin assigns library permissions per user (manual)
-6. Admin triggers initial recommendation refresh (manual)
+2. Plugin creates per-user directories in the plugin data folder
+3. Plugin creates two Jellyfin libraries per user and sets each user's library access to their own
+4. Plugin fills and scans the libraries on the next refresh (at startup, and daily)
 
 ### Recommendation Refresh (Automatic Daily / Manual)
 1. Scheduled task triggers Recommendation Refresh Service (default: daily 4:00 AM, or manual)
@@ -448,7 +442,7 @@ siblings) is handled by symlinking the trailer files by name — no custom scann
    - Top N items selected per media type (movies, TV)
    - Virtual Library Manager clears old symlinks and creates new ones for this user
 6. Recommendation Refresh Service logs completion
-7. Users manually scan recommendation libraries (or wait for scheduled scan) to see updated recommendations
+7. Recommendation Library Service scans the libraries that need it, so updates appear without a manual scan
 
 **Play Status Sync During Usage:**
 - When a user finishes watching or toggles played/favorite on a virtual library item, PlayStatusSyncService syncs the state to the source library item
@@ -514,33 +508,16 @@ All settings exposed via plugin configuration UI and stored in Jellyfin's plugin
 
 ## Known Limitations
 
-### Virtual Library Metadata Display
+### Virtual Library Metadata
 
-**Limitation:** Items in the virtual recommendation libraries do not display full text metadata (runtime, ratings, genres, cast, etc.) in the Jellyfin UI.
+**What the plugin provides:** Recommendation libraries never look anything up online. For each recommendation the plugin writes an NFO carrying title, year, plot, tagline, rating, premiere date, genres, studios and provider ids, and symlinks the item's artwork (poster, backdrop, logo, banner, thumb, disc) from wherever Jellyfin stores it. Episodes get their own image linked beside the episode symlink, because Jellyfin's `EpisodeLocalImageProvider` reads only files named after the episode file itself.
 
-**Why this happens:**
-- Virtual library items are symlinks under a distinct library root, so Jellyfin treats them as separate `BaseItem`s from the source media
-- Metadata providers run against the virtual item's library root, which may be configured differently than the source library (e.g., no TMDB lookups)
+**What this depends on:** the item being scanned after those files exist. An item created by a library validation pass is never metadata-refreshed, so it would otherwise keep the raw folder name `MovieResolver` assigns it and show no poster, however correct its files are. The refresh therefore also scans any library still holding never-refreshed items.
 
-**What DOES work:**
-- **Poster/backdrop images:** Jellyfin picks up `poster.jpg`, `fanart.jpg`, etc. that the plugin symlinks from the source folder, preserving any custom artwork
-- **Playback:** All media plays correctly through the symlinked files (direct play and transcoding both work, unlike the old `.strm` approach on Jellyfin ≥10.11.7)
-
-**What does NOT work:**
-- Runtime/duration is not displayed for recommendations (shows as unknown or 0:00)
-- Ratings, genres, and cast information may not appear in the UI
-- Any text metadata customizations from source items
-
-**Workarounds considered but not viable for text metadata:**
-- Direct database manipulation: Would bypass Jellyfin's APIs and risk data corruption
-- Custom metadata providers: Would require significant additional complexity
-- Jellyfin API calls post-scan: Fragile timing, items may not exist yet when called
-
-**User impact:**
-- Users can still play recommendations normally
-- Custom posters and backdrops are preserved in recommendation libraries
-- Full metadata is visible once playback begins (from the source item)
-- This is a cosmetic limitation that doesn't affect recommendation quality or playback
+**Still not carried over:**
+- Runtime/duration is not written to the NFO, so it can show as unknown until playback begins
+- Cast and crew are not written to the NFO
+- Trickplay and chapter images are deliberately disabled for these libraries
 
 ### Duplicate "Continue Watching" / "Next Up" Entries
 
@@ -561,9 +538,8 @@ All settings exposed via plugin configuration UI and stored in Jellyfin's plugin
 
 ### Other Limitations
 
-- **No automatic library creation:** Admin must manually create Jellyfin libraries pointing to plugin directories
-- **No automatic permission assignment:** Admin must manually assign library access per user
-- **Manual library scan required:** After recommendation refresh, users should scan recommendation libraries to see updates
+- **Runtime and cast are not written to the NFO:** they can be missing from a recommendation's detail view
+- **Recommendation libraries do not use real-time monitoring:** the plugin writes the folders and scans them itself, so no folder watchers are added for them
 
 ## Security & Privacy
 

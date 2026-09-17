@@ -1,7 +1,7 @@
 # Jellyfin Local Recommendations Plug-in
 
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tests](https://github.com/rdpharr/jellyfin-plugin-localrecs/actions/workflows/tests.yml/badge.svg)](https://github.com/rdpharr/jellyfin-plugin-localrecs/actions/workflows/tests.yml)
+[![Tests](https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/actions/workflows/tests.yml/badge.svg)](https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/actions/workflows/tests.yml)
 
 Privacy-first personalized recommendations for Jellyfin based entirely on local watch history and metadata similarity. No cloud services, no tracking. Works on all Jellyfin clients (even TVs).
 
@@ -14,6 +14,7 @@ Please report any issues or feedback on [GitHub Issues](https://github.com/rdpha
 
 ## Features
 
+- **Automatic setup** - Each user's recommendation libraries are created, scoped to them, and removed with the user; no admin steps
 - **Per-user personalization** - Tailored recommendations for each user's viewing history
 - **Content-based filtering** - TF-IDF embeddings with cosine similarity matching
 - **Temporal similarity** - Decade-based grouping finds content from similar time periods
@@ -115,9 +116,9 @@ Access via: **Dashboard → Plugins → Local Recommendations → Settings**
 
 Recommendations appear as separate libraries for each user:
 
-- Plugin creates filesystem symlinks pointing to original media files (with matching artwork symlinks)
-- Admin creates Jellyfin libraries pointing to plugin directories (one-time setup)
-- Each user gets Movies and TV libraries with personalized recommendations
+- Plugin creates filesystem symlinks pointing to original media files, with matching artwork symlinks and a generated NFO per item
+- Plugin creates the Jellyfin libraries itself — one Movies and one TV library per user — and sets each user's library access so they see only their own
+- Plugin scans those libraries itself at the end of each refresh; no manual scan is needed
 - Play status sync: Watch state on recommendation items is synced back to the source library
 - Watched items are cleaned up at the next scheduled recommendation refresh
 
@@ -132,9 +133,7 @@ Recommendations appear as separate libraries for each user:
 ## Known Limitations
 
 - **Duplicate "Continue Watching" / "Next Up":** Partially watched recommendations appear twice — once for the virtual (symlinked) item and once for the source media file. This resolves on the next recommendation refresh, or you can manually trigger a refresh from Scheduled Tasks.
-- **Metadata display:** Virtual library items may not show full text metadata (runtime, ratings, cast) in the UI because Jellyfin treats them as items in a separate library. Posters, backdrops, and playback work normally.
-- **Manual setup required:** Admin must manually create libraries and set permissions (Jellyfin API limitation)
-- **Library scanning:** Manually scan recommendation libraries after refresh to see updates
+- **Metadata comes from the plugin, not the internet:** Recommendation libraries never do online lookups. Title, year, plot, genres, studios, ratings and dates come from an NFO the plugin writes, and artwork is symlinked from your real library, so custom posters are preserved. Runtime and cast are not written, so they can be missing from a recommendation's detail view.
 - **Windows symlink permissions:** Requires Administrator or Developer Mode — see Troubleshooting.
 
 ## Troubleshooting
@@ -186,23 +185,23 @@ restricted `.strm` parser entirely.
 **Prerequisites:** .NET 10.0 SDK, Git
 
 ```bash
-git clone https://github.com/rdpharr/jellyfin-plugin-localrecs.git
+git clone https://github.com/crystal-coding-time/jellyfin-plugin-localrecs.git
 cd jellyfin-plugin-localrecs
 
-# Build (uses dotnet-helper.sh wrapper)
-bash dotnet-helper.sh build
+# Build
+dotnet build
 
 # Run tests
-bash dotnet-helper.sh test
+dotnet test
 
 # Output: Jellyfin.Plugin.LocalRecs/bin/Debug/net10.0/
 ```
 
-**Windows:** Use Git Bash or WSL to run the helper script.
+**Windows:** `dotnet-helper.sh` wraps a full path to `dotnet.exe`, for Git Bash or WSL shells where `dotnet` is not on the PATH.
 
 ## Contributing
 
-Contributions to the current Jellyfin version are welcome. See [DESIGN.md](DESIGN.md) for technical details and architecture. For Jellyfin 12 support, please create a fork; maintained forks can be submitted for inclusion in the notice above.
+Contributions are welcome. See [DESIGN.md](DESIGN.md) for technical details and architecture. This repository is the Jellyfin 12 fork; changes that also apply to Jellyfin 10.11 belong upstream in [rdpharr/jellyfin-plugin-localrecs](https://github.com/rdpharr/jellyfin-plugin-localrecs).
 
 ## Support
 
