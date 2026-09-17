@@ -212,7 +212,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                     }
 
                     var folder = Path.Combine(libraryPath, GenerateFolderName(item));
-                    DeleteDanglingLinks(folder);
+                    changed |= DeleteDanglingLinks(folder);
                     keptFolders.Add(folder);
 
                     createdCount++;
@@ -250,23 +250,35 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         }
 
         /// <summary>
-        /// Removes links whose source file is gone (e.g. a deleted episode) from a folder that is kept.
+        /// Removes links whose source file is gone (e.g. a deleted episode) from a folder that is kept,
+        /// and reports whether anything was removed. Removing a file changes a folder just as much as
+        /// writing one does, and only users whose folders changed are rescanned: unreported, Jellyfin
+        /// keeps serving a row that points at a link which is no longer there.
         /// </summary>
-        private void DeleteDanglingLinks(string folder)
+        private bool DeleteDanglingLinks(string folder)
         {
             if (!Directory.Exists(folder))
             {
-                return;
+                return false;
             }
 
+            var deleted = false;
             foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories))
             {
                 var info = new FileInfo(file);
-                if (info.LinkTarget is not null && !File.Exists(file))
+
+                // The link's target is what has to be tested, not the link itself: File.Exists reports
+                // a dangling link as present on .NET 10 (verified on macOS), so checking the link left
+                // this never firing and dangling links were never actually removed. Every link here is
+                // written by CreateSymlink with an absolute target, so File.Exists resolves it directly.
+                if (info.LinkTarget is not null && !File.Exists(info.LinkTarget))
                 {
                     info.Delete();
+                    deleted = true;
                 }
             }
+
+            return deleted;
         }
 
         private void DeleteFolder(string path)
@@ -353,6 +365,7 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             }
 
             var episodeCount = 0;
+            var episodeImageCount = 0;
             foreach (var seasonGroup in episodes.GroupBy(e => e.ParentIndexNumber ?? 0).OrderBy(g => g.Key))
             {
                 var seasonNumber = seasonGroup.Key;
@@ -374,6 +387,12 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                     try
                     {
                         changed |= CreateSymlink(linkPath, episode.Path);
+                        if (LinkEpisodeImage(seasonPath, baseFilename, episode))
+                        {
+                            changed = true;
+                            episodeImageCount++;
+                        }
+
                         episodeCount++;
                     }
                     catch (UnauthorizedAccessException ex)
@@ -388,13 +407,45 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             }
 
             _logger.LogDebug(
-                "Created series folder: {SeriesFolder} with {EpisodeCount} episodes, {TrailerCount} trailer(s), {ArtworkCount} artwork file(s)",
+                "Created series folder: {SeriesFolder} with {EpisodeCount} episodes, {EpisodeImageCount} episode image(s), {TrailerCount} trailer(s), {ArtworkCount} artwork file(s)",
                 seriesFolderName,
                 episodeCount,
+                episodeImageCount,
                 trailerCount,
                 artworkCount);
 
             return changed;
+        }
+
+        /// <summary>
+        /// Links an episode's own image beside its symlink. Jellyfin routes episodes to a dedicated
+        /// provider (<c>EpisodeLocalImageProvider</c>) which reads only files named after the episode
+        /// file itself: "&lt;episode filename&gt;.&lt;ext&gt;" or "&lt;episode filename&gt;-thumb.&lt;ext&gt;".
+        /// The folder-level names <see cref="LinkItemArtwork"/> writes, and the series' own poster, are
+        /// never consulted for an episode, so without this an episode tile has no image at all.
+        /// </summary>
+        private bool LinkEpisodeImage(string seasonPath, string baseFilename, Episode episode)
+        {
+            string? sourcePath;
+            try
+            {
+                sourcePath = episode.GetImagePath(ImageType.Primary, 0);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to resolve Primary image for episode {EpisodeName}", episode.Name);
+                return false;
+            }
+
+            // An episode with no image of its own is normal; the tile falls back to Jellyfin's default.
+            if (string.IsNullOrEmpty(sourcePath) || !File.Exists(sourcePath))
+            {
+                return false;
+            }
+
+            var extension = Path.GetExtension(sourcePath);
+            var linkName = baseFilename + (string.IsNullOrEmpty(extension) ? ".jpg" : extension);
+            return TryCreateSymlink(Path.Combine(seasonPath, linkName), sourcePath);
         }
 
         /// <summary>
@@ -412,7 +463,8 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                 return false;
             }
 
-            // LinkTarget also catches a dangling link, which FileInfo.Exists reports as missing.
+            // LinkTarget is what identifies a link, a dangling one included. FileInfo.Exists cannot be
+            // relied on to spot one: it reports a dangling link as present on .NET 10 (verified on macOS).
             if (existing.Exists || existing.LinkTarget is not null)
             {
                 existing.Delete();

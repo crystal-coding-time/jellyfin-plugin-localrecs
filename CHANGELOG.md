@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **TV episode recommendations now have artwork.** Jellyfin gives episodes their own image provider, `EpisodeLocalImageProvider`, and it reads only files named after the episode file itself: `<episode filename>.<ext>` or `<episode filename>-thumb.<ext>`. The plugin wrote a bare video symlink into each season folder and nothing beside it, so an episode tile had no image it could possibly find — a series' or season's poster is never consulted for an episode. Frame extraction could not cover the gap either: it comes from `VideoImageProvider`, which is an `IDynamicImageProvider` rather than a local one, so the empty `ImageFetchers` list that keeps recommendation libraries offline switches it off. Each episode's own image is now linked beside its symlink.
+
+  This was never a Jellyfin 12 regression. The same gap is present in the upstream plugin and predates the 12 port, which changed no C# at all; what changed is that per-user TV libraries now populate and get scanned, so the missing artwork became visible.
+
+  Measured on the test server (300 shows of 12 episodes, 1,200 recommendation episodes), comparing the published v0.9.3 against this build: **0 of 1,200 episodes had an image before, 1,200 of 1,200 after.**
+
+- **Links to deleted files are now actually removed, and the removal is reported.** The dangling-link sweep asked whether the *link* existed rather than whether its target did, and `File.Exists` follows a symlink and still reports a dangling one as present on .NET 10, so the check never fired once and a link to a deleted source file was never cleaned up. The result was discarded as well, and since only users whose folders changed are rescanned, a folder that had lost a file was left behind with Jellyfin still serving a row that pointed at it. The sweep now tests the link's target and reports what it removed, so that user's library is rescanned.
+
+  A repeat refresh still takes 6 seconds and still skips the libraries that did not change, so this costs nothing.
+
+### Known issues
+
+- Posters are still missing for some users' **movie** recommendations, and those entries show the raw folder name instead of the clean title. Both symptoms come from the same place: `MovieResolver` only clears `IsInMixedFolder` and names a movie from its folder in one branch, and an item that misses that branch loses its poster lookup and its NFO title together. What makes a movie miss it on a real server is not yet known — it has not reproduced across eight test-server runs, and nine candidate causes have been ruled out against Jellyfin's source and on the test server (empty image fetchers, empty metadata fetchers, image stubs, a `trailers/` subfolder, sibling trailer files, `-trailer1`/`-trailer2` naming, artwork missing at source, and upgrade history from both 0.7.0 and 0.9.1). Diagnosing it needs evidence from a server that actually shows it.
+
 ## [0.9.3] - Unreleased
 
 ### Fixed

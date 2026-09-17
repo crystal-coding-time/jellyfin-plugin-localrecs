@@ -282,6 +282,123 @@ namespace Jellyfin.Plugin.LocalRecs.Tests.Unit.VirtualLibrary
         }
 
         [Fact]
+        public void SyncRecommendations_ReportsChangeWhenDanglingArtworkIsRemoved()
+        {
+            if (!CanCreateSymlinks())
+            {
+                return;
+            }
+
+            var userId = Guid.NewGuid();
+            _manager.EnsureUserDirectoriesExist(userId, "TestUser");
+
+            var posterPath = Path.Combine(_sourceMediaDir, "poster.jpg");
+            File.WriteAllText(posterPath, "fake poster");
+
+            var movieId = Guid.NewGuid();
+            _mockLibraryManager.Setup(m => m.GetItemById(movieId)).Returns(new Movie
+            {
+                Id = movieId,
+                Name = "Art Movie",
+                Path = _sourceMediaFile,
+                ProductionYear = 2023,
+                ImageInfos = new[] { new ItemImageInfo { Type = ImageType.Primary, Path = posterPath } }
+            });
+
+            var recommendations = new[] { new ScoredRecommendation(movieId, 0.9f) };
+            _manager.SyncRecommendations(userId, recommendations, MediaType.Movie);
+
+            var folder = Directory.GetDirectories(_manager.GetUserLibraryPath(userId, MediaType.Movie)).Single();
+            File.Exists(Path.Combine(folder, "poster.jpg")).Should().BeTrue();
+
+            // The source artwork disappears, so nothing is written this time and the stale links are
+            // removed instead. Removing a file changes the folder just as much as writing one does:
+            // if that is not reported, this user is not rescanned and Jellyfin keeps serving an image
+            // row pointing at a link that no longer exists, leaving the poster broken indefinitely.
+            File.Delete(posterPath);
+
+            _manager.SyncRecommendations(userId, recommendations, MediaType.Movie, out var changed);
+
+            Directory.GetFiles(folder, "poster.jpg").Should().BeEmpty();
+            changed.Should().BeTrue();
+        }
+
+        [Fact]
+        public void SyncRecommendations_LinksEpisodeImageBesideEpisodeSymlink()
+        {
+            if (!CanCreateSymlinks())
+            {
+                return;
+            }
+
+            var userId = Guid.NewGuid();
+            _manager.EnsureUserDirectoriesExist(userId, "TestUser");
+
+            var seriesDir = Path.Combine(_testBasePath, "source", "TestShow");
+            var seasonDir = Path.Combine(seriesDir, "Season 01");
+            Directory.CreateDirectory(seasonDir);
+            var episodeFile = Path.Combine(seasonDir, "TestShow S01E01.mkv");
+            File.WriteAllText(episodeFile, "fake episode");
+
+            // An episode's image usually lives in Jellyfin's metadata cache rather than beside the
+            // video, so it is reached through ImageInfos, the same way movie and series artwork is.
+            var episodeImage = Path.Combine(seasonDir, "cached-episode-image.jpg");
+            File.WriteAllText(episodeImage, "fake episode image");
+
+            var seriesId = Guid.NewGuid();
+            var series = new MediaBrowser.Controller.Entities.TV.Series
+            {
+                Id = seriesId,
+                Name = "Test Show",
+                Path = seriesDir,
+                ProductionYear = 2020
+            };
+
+            var episode = new MediaBrowser.Controller.Entities.TV.Episode
+            {
+                Id = Guid.NewGuid(),
+                Name = "Pilot",
+                Path = episodeFile,
+                SeriesName = "Test Show",
+                ParentIndexNumber = 1,
+                IndexNumber = 1,
+                ImageInfos = new[] { new ItemImageInfo { Type = ImageType.Primary, Path = episodeImage } }
+            };
+
+            _mockLibraryManager.Setup(m => m.GetItemById(seriesId)).Returns(series);
+            _mockLibraryManager
+                .Setup(m => m.GetItemList(It.IsAny<InternalItemsQuery>()))
+                .Returns(new[] { episode });
+
+            _manager.SyncRecommendations(
+                userId,
+                new[] { new ScoredRecommendation(seriesId, 0.9f) },
+                MediaType.Series);
+
+            var seriesFolder = Directory.GetDirectories(_manager.GetUserLibraryPath(userId, MediaType.Series)).Single();
+            var seasonFolder = Path.Combine(seriesFolder, "Season 01");
+            var episodeLink = Directory.GetFiles(seasonFolder, "*.mkv").Single();
+
+            // Jellyfin routes episodes to EpisodeLocalImageProvider, which reads only
+            // "<episode filename>.<ext>" or "<episode filename>-thumb.<ext>" beside the video.
+            // Series- and season-level artwork is never used for an episode tile, so without a
+            // file under one of those two names an episode can never show an image.
+            var expected = Path.Combine(seasonFolder, Path.GetFileNameWithoutExtension(episodeLink) + ".jpg");
+            File.Exists(expected).Should().BeTrue();
+            new FileInfo(expected).LinkTarget.Should().NotBeNull();
+
+            // A second sync must report nothing changed. Only users whose folders changed get their
+            // libraries scanned, so an image link that looked new on every run would pull every user
+            // back into the scan and undo the saving that took two releases to land.
+            _manager.SyncRecommendations(
+                userId,
+                new[] { new ScoredRecommendation(seriesId, 0.9f) },
+                MediaType.Series,
+                out var changedAgain);
+            changedAgain.Should().BeFalse();
+        }
+
+        [Fact]
         public void SyncRecommendations_ClearsOldRecommendationsBeforeCreatingNew()
         {
             if (!CanCreateSymlinks())
