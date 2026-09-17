@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.LocalRecs.Models;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
@@ -205,9 +206,10 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         }
 
         /// <summary>
-        /// Scans the recommendation libraries of the given users. Scanning every user's libraries on every
-        /// refresh is what made refreshes take longer the more users a server has, so users whose folders
-        /// didn't change are skipped.
+        /// Scans the recommendation libraries of the given users, and of any user whose library still holds
+        /// items Jellyfin has never read. Scanning every user's libraries on every refresh is what made
+        /// refreshes take longer the more users a server has, so users whose folders didn't change are
+        /// skipped — but only once their items have actually been read.
         /// </summary>
         /// <param name="userIds">The users whose recommendations changed.</param>
         /// <param name="cancellationToken">Cancellation token.</param>
@@ -215,12 +217,6 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
         public async Task ScanAsync(IReadOnlyCollection<Guid> userIds, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(userIds);
-
-            if (userIds.Count == 0)
-            {
-                _logger.LogInformation("No recommendations changed, skipping library scans");
-                return;
-            }
 
             // A library's folders are registered when the library is created, and at that point they are
             // still empty, so Jellyfin skips them ("inaccessible or empty") and a later scan of that library
@@ -232,13 +228,18 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
             {
                 if (library.Locations.Length != 1
                     || GetOwner(Normalize(library.Locations[0])) is not Guid owner
-                    || !userIds.Contains(owner))
+                    || !Guid.TryParse(library.ItemId, out var itemId)
+                    || _libraryManager.GetItemById(itemId) is not CollectionFolder folder)
                 {
                     continue;
                 }
 
-                if (!Guid.TryParse(library.ItemId, out var itemId)
-                    || _libraryManager.GetItemById(itemId) is not CollectionFolder folder)
+                // Unchanged files are not the same as files Jellyfin has read. An item created by a library
+                // validation pass is never metadata-refreshed (Folder.ValidateSubFolders refreshes no child
+                // metadata), so it keeps the raw folder name MovieResolver gave it and has no image: the NFO
+                // and local image providers never ran for it. Nothing rewrites those files afterwards, so
+                // without this such a user never looks changed again and is never scanned again.
+                if (!userIds.Contains(owner) && !HasUnreadItems(folder))
                 {
                     continue;
                 }
@@ -299,6 +300,26 @@ namespace Jellyfin.Plugin.LocalRecs.VirtualLibrary
                     _logger.LogError(ex, "Failed to update library access after library {LibraryName} was added", folder.Name);
                 }
             });
+        }
+
+        /// <summary>
+        /// Whether a library still holds items Jellyfin has never refreshed metadata for. Such an item shows
+        /// the raw folder name and no poster however correct its files are, and only a scan fixes it.
+        /// </summary>
+        private bool HasUnreadItems(CollectionFolder folder)
+        {
+            // An AncestorId that resolves to a CollectionFolder is turned into a TopParentIds scope by
+            // ILibraryManager, so this never degrades into a query over the whole server.
+            // ponytail: one scoped query per unchanged library per refresh; narrow it if a refresh's
+            // timings ever show it.
+            var items = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                AncestorIds = new[] { folder.Id },
+                Recursive = true,
+                DtoOptions = new DtoOptions(false) { EnableImages = false, EnableUserData = false }
+            });
+
+            return items is not null && items.Any(i => i.DateLastRefreshed == default);
         }
 
         private async Task<int> EnsureLibrariesAsync(List<Jellyfin.Database.Implementations.Entities.User> users)
