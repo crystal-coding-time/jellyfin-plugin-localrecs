@@ -8,6 +8,14 @@
     "category": "General",
     "versions": [
       {
+        "version": "0.9.4.0",
+        "changelog": "Movie recommendations no longer keep the raw folder name and no poster: a library is now also scanned when it still holds items Jellyfin has never refreshed, which repairs items that were created by a library validation pass and never read. Also adds artwork to TV episode recommendations, and actually removes links whose source file was deleted. REQUIRES Jellyfin 12.0 or newer.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/crystal-coding-time/jellyfin-plugin-localrecs/releases/download/v0.9.4/jellyfin-plugin-localrecs-v0.9.4.zip",
+        "checksum": "54c7714b97820ea4cffc40b6316bdc05",
+        "timestamp": "2026-09-16T00:00:00Z"
+      },
+      {
         "version": "0.7.0.0",
         "changelog": "Jellyfin 12 support\n- Retargeted to .NET 10 and built against Jellyfin 12.0.0 (tested on 12.0 and 12.1)\n- No functional changes\n- REQUIRES Jellyfin 12.0 or newer; 10.11.9+ servers should stay on 0.6.1\n- Run a full library scan after upgrading Jellyfin to 12",
         "targetAbi": "12.0.0.0",
