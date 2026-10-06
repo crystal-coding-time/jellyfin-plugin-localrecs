@@ -25,7 +25,7 @@ Please report any issues or feedback for this fork on [GitHub Issues](https://gi
 
 ## Requirements
 
-- **Jellyfin Server:** 12.0+ (tested against 12.0 and 12.1; use plugin 0.6.1 for 10.11.9+)
+- **Jellyfin Server:** 12.0+ (tested against 12.0, 12.1 and 12.2; use plugin 0.6.1 for 10.11.9+)
 - **.NET Runtime:** 10.0
 - **Target ABI:** 12.0.0.0
 
